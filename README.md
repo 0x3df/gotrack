@@ -2,8 +2,8 @@
   <pre>
 ______     ______     ______   ______     ______     ______     __  __
 /\  ___\   /\  __ \   /\__  _\ /\  == \   /\  __ \   /\  ___\   /\ \/ /
-\ \ \__ \  \ \ \/\ \  \/_/\ \/ \ \  __<   \ \  __ \  \ \ \____  \ \  _"-.
- \ \_____\  \ \_____\    \ \_\  \ \_\ \_\  \ \_\ \_\  \ \_____\  \ \_\ \_\
+\ \__ \  \ \/\ \ \  \/_/\ \/ \ \  __<   \ \  __ \  \ \ \____  \ \  _"-.
+ \_____\  \_____\    \ \_\  \ \_\ \_\  \_\ \_\  \ \_____\  \_\ \_\
   \/_____/   \/_____/     \/_/   \/_/ /_/   \/_/\/_/   \/_____/   \/_/\/_/
   </pre>
   <h1>GoTrack</h1>
@@ -29,9 +29,21 @@ ______     ______     ______   ______     ______     ______     __  __
 - **Ambient mode:** optional omnidirectional starfield background for the dashboard.
 - **Portable:** zero external runtime dependencies outside the Go ecosystem.
 
-## Quick Start
+## Installation
+
+### Option 1: `go install` (Recommended)
 
 ```bash
+go install github.com/0x3df/gotrack@latest
+```
+
+This installs the `gotrack` binary to your Go bin directory (typically `$HOME/go/bin`).
+
+### Option 2: Build from source
+
+```bash
+git clone https://github.com/0x3df/gotrack.git
+cd gotrack
 go build -o gotrack .
 ./gotrack
 ```
@@ -58,6 +70,57 @@ On first launch, GoTrack walks you through a setup wizard so you can:
 
 - GoTrack stores your database and config in the workspace you chose on first launch.
 - Rebuilding or replacing the `gotrack` binary does not delete this workspace or wipe your data.
+
+## FAQ
+
+### Configuration
+
+**How do I add custom trackers?**
+Press `s` to open settings, then navigate to the tracker configuration section. You can add new trackers with names and select their type.
+
+**What tracker types are available?**
+- **Binary**: yes/no, true/false (checkbox)
+- **Duration**: time span (hours:minutes)
+- **Numeric**: any number (integer or decimal)
+- **Rating**: 1-5 star rating
+- **Text**: free-form text notes
+
+**How do I enable Obsidian export?**
+In settings (`s`), find the Obsidian section. Enter your vault path and optionally a template. Each day's entry will be mirrored as a markdown file.
+
+### Controls & Navigation
+
+**What are all the keyboard shortcuts?**
+- `a`: add/edit entry
+- `s`: settings
+- `esc`: cancel/back
+- `h`/`l` or `←`/`→`: switch tabs
+- `j`/`k` or `↓`/`↑`: scroll
+- `q`: quit
+
+**How do I navigate between views?**
+Use `h`/`l` or the arrow keys to switch between dashboard tabs (overview, trends, correlations).
+
+### Visual Customization
+
+**How do I change themes?**
+Open settings (`s`) and navigate to the theme section. Choose between GoTrack (default), Catppuccin, or Nord.
+
+**What is the starfield mode?**
+The starfield is an ambient animated background for the dashboard. Toggle it on/off in settings (`s` → appearance).
+
+### Data & Storage
+
+**Where is my data stored?**
+Your data lives in the workspace directory you chose during first launch (default: `~/.gotrack`). It contains:
+- `gotrack.db` - SQLite database with all entries
+- `config.json` - your configuration
+
+**How do I backup or restore?**
+Simply copy the workspace directory. To restore, point GoTrack to your backup directory on next launch.
+
+**Does reinstalling wipe my data?**
+No. The binary and data are separate. Replacing `gotrack` won't affect your database in `~/.gotrack`.
 
 ## Stack
 

@@ -70,14 +70,14 @@ func newSetupWiz() *setupWiz {
 
 func newAbortableSetupWiz(abortMsg tea.Msg) *setupWiz {
 	w := &setupWiz{
-		workspace:         "~/.dailytrack",
+		workspace:         "~/.gotrack",
 		targetUnits:       make(map[string]*string),
 		targets:           make(map[string]*string),
 		customTrackerType: models.TrackerBinary,
 		appSettings: appSettingsDraft{
 			Theme: models.ThemeGoTrack,
 		},
-		abortMsg:          abortMsg,
+		abortMsg: abortMsg,
 	}
 	w.buildForm()
 	return w
@@ -89,7 +89,7 @@ func (w *setupWiz) buildForm() {
 		w.form = huh.NewForm(huh.NewGroup(
 			huh.NewInput().
 				Title("Data Directory").
-				Description("Where should DailyTrack store your database and config?").
+				Description("Where should GoTrack store your database and config?").
 				Value(&w.workspace),
 			huh.NewSelect[string]().
 				Title("Setup Mode").
@@ -566,15 +566,15 @@ func (w *setupWiz) Update(msg tea.Msg) tea.Cmd {
 		if w.phase == phaseDone {
 			cfg := w.tempConfig
 			if err := db.SetWorkspacePath(w.workspace); err != nil {
-				fmt.Fprintf(os.Stderr, "dailytrack: failed to set workspace: %v\n", err)
+				fmt.Fprintf(os.Stderr, "gotrack: failed to set workspace: %v\n", err)
 				return nil
 			}
 			if err := db.SaveConfig(cfg); err != nil {
-				fmt.Fprintf(os.Stderr, "dailytrack: failed to save config: %v\n", err)
+				fmt.Fprintf(os.Stderr, "gotrack: failed to save config: %v\n", err)
 				return nil // don't proceed — user will see setup again on next launch
 			}
 			if err := db.InitDB(); err != nil {
-				fmt.Fprintf(os.Stderr, "dailytrack: failed to init db: %v\n", err)
+				fmt.Fprintf(os.Stderr, "gotrack: failed to init db: %v\n", err)
 			}
 			return func() tea.Msg { return setupDoneMsg{cfg: cfg} }
 		}

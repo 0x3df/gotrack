@@ -266,7 +266,7 @@ func (m *Model) updateDateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.dateForm.State == huh.StateCompleted {
 		entry, err := db.GetEntryForDate(m.entryDate)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "dailytrack: failed to load entry: %v\n", err)
+			fmt.Fprintf(os.Stderr, "gotrack: failed to load entry: %v\n", err)
 			m.state = stateDashboard
 			return m, nil
 		}
@@ -437,11 +437,11 @@ func (m *Model) saveEntry() {
 		Data: data,
 	}
 	if err := db.UpsertEntry(entry); err != nil {
-		fmt.Fprintf(os.Stderr, "dailytrack: failed to save entry: %v\n", err)
+		fmt.Fprintf(os.Stderr, "gotrack: failed to save entry: %v\n", err)
 		return
 	}
 	if err := integrations.ExportObsidianEntry(m.config, entry); err != nil {
-		fmt.Fprintf(os.Stderr, "dailytrack: failed to export obsidian note: %v\n", err)
+		fmt.Fprintf(os.Stderr, "gotrack: failed to export obsidian note: %v\n", err)
 	}
 }
 
