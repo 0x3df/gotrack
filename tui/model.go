@@ -223,7 +223,7 @@ func (m *Model) initDateForm() {
 	))
 }
 
-func (m Model) updateDateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *Model) updateDateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	form, cmd := m.dateForm.Update(msg)
 	if f, ok := form.(*huh.Form); ok {
 		m.dateForm = f
