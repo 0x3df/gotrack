@@ -1,6 +1,11 @@
 package tui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/charmbracelet/x/ansi"
+)
 
 func TestDashboardLayoutForWidth_UsesOneColumnWhenNarrow(t *testing.T) {
 	layout := dashboardLayoutForWidth(78)
@@ -40,5 +45,45 @@ func TestDashboardLayoutForWidth_DoesNotOverflowNarrowTerminal(t *testing.T) {
 
 	if layout.ContentWidth > 32 {
 		t.Fatalf("layout.ContentWidth = %d, want <= terminal width", layout.ContentWidth)
+	}
+}
+
+func TestRenderCard_WrapsLongLinesInsideBorder(t *testing.T) {
+	card := renderCard(
+		"Title", palette().Primary, "abcdefghijklmnopqrstuvwxyz",
+		20, // lipgloss block width (cells)
+		0,  // height 0: no fixed vertical size
+	)
+	lines := strings.Split(card, "\n")
+	if len(lines) < 3 {
+		t.Fatalf("renderCard() produced %d lines, want at least 3", len(lines))
+	}
+
+	innerWidth := ansi.StringWidth(lines[0])
+	for i, line := range lines {
+		if ansi.StringWidth(line) != innerWidth {
+			t.Fatalf("line %d width = %d, want %d; line=%q", i, ansi.StringWidth(line), innerWidth, line)
+		}
+	}
+}
+
+func TestRenderCard_RespectsFixedHeight(t *testing.T) {
+	content := strings.Join([]string{
+		"line1",
+		"line2",
+		"line3",
+		"line4",
+		"line5",
+		"line6",
+	}, "\n")
+
+	card := renderCard(
+		"Title", palette().Primary, content,
+		30, // lipgloss block width (cells)
+		8,  // fixed card height in terminal rows
+	)
+	lines := strings.Split(strings.TrimRight(card, "\n"), "\n")
+	if len(lines) != 8 {
+		t.Fatalf("len(lines) = %d, want 8", len(lines))
 	}
 }

@@ -12,11 +12,25 @@ import (
 
 type starfieldTickMsg time.Time
 
+// SpawnEdge records which screen edge a star originated from.
+type SpawnEdge int
+
+const (
+	SpawnEdgeNone SpawnEdge = iota
+	SpawnEdgeTop
+	SpawnEdgeRight
+	SpawnEdgeBottom
+	SpawnEdgeLeft
+)
+
 type fallingStar struct {
-	X      int
-	Y      int
-	Trail  int
-	Bright bool
+	X         int
+	Y         int
+	VX        int
+	VY        int
+	Trail     int
+	Bright    bool
+	SpawnEdge SpawnEdge
 }
 
 func starfieldTick() tea.Cmd {
@@ -28,12 +42,13 @@ func starfieldTick() tea.Cmd {
 func stepStars(stars []fallingStar, width, height int) []fallingStar {
 	var next []fallingStar
 	for _, star := range stars {
-		star.X--
-		star.Y++
-		if star.Y >= height {
+		star.X += star.VX
+		star.Y += star.VY
+		t := star.Trail
+		if star.Y < -t || star.Y >= height+t {
 			continue
 		}
-		if star.X+star.Trail < 0 {
+		if star.X < -t || star.X >= width+t {
 			continue
 		}
 		next = append(next, star)
@@ -52,21 +67,53 @@ func maybeSpawnStar(stars []fallingStar, width, height int, rng *rand.Rand) []fa
 		return stars
 	}
 
-	spawnY := 0
-	if height > 4 {
-		spawnY = rng.Intn(minInt(4, height))
-	}
-	spawnX := width - 1
-	if width > 8 {
-		spawnX = width - 1 - rng.Intn(minInt(width/5, 8))
+	edge := SpawnEdge(int(SpawnEdgeTop) + rng.Intn(4))
+	star := fallingStar{
+		Trail:     2 + rng.Intn(2),
+		Bright:    rng.Intn(2) == 0,
+		SpawnEdge: edge,
 	}
 
-	return append(stars, fallingStar{
-		X:      spawnX,
-		Y:      spawnY,
-		Trail:  2 + rng.Intn(2),
-		Bright: rng.Intn(2) == 0,
-	})
+	switch edge {
+	case SpawnEdgeTop:
+		star.X = rng.Intn(width)
+		star.Y = 0
+		star.VX = []int{-1, 0, 1}[rng.Intn(3)]
+		star.VY = 1
+	case SpawnEdgeRight:
+		star.X = width - 1
+		star.Y = rng.Intn(height)
+		star.VX = -1
+		star.VY = []int{-1, 0, 1}[rng.Intn(3)]
+	case SpawnEdgeBottom:
+		star.X = rng.Intn(width)
+		star.Y = height - 1
+		star.VX = []int{-1, 0, 1}[rng.Intn(3)]
+		star.VY = -1
+	default: // SpawnEdgeLeft
+		star.X = 0
+		star.Y = rng.Intn(height)
+		star.VX = 1
+		star.VY = []int{-1, 0, 1}[rng.Intn(3)]
+	}
+
+	return append(stars, star)
+}
+
+func trailGlyphForVector(vx, vy int) string {
+	if vx == 0 && vy == 0 {
+		return "."
+	}
+	if vx == 0 {
+		return "|"
+	}
+	if vy == 0 {
+		return "-"
+	}
+	if (vx > 0 && vy > 0) || (vx < 0 && vy < 0) {
+		return "\\"
+	}
+	return "/"
 }
 
 func renderStarfieldCanvas(width, height int, stars []fallingStar) string {
@@ -85,7 +132,7 @@ func renderStarfieldCanvas(width, height int, stars []fallingStar) string {
 
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color(p.StarDim))
 	bright := lipgloss.NewStyle().Foreground(lipgloss.Color(p.StarBright)).Bold(true)
-	trail := lipgloss.NewStyle().Foreground(lipgloss.Color(p.StarTrail))
+	trailStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(p.StarTrail))
 
 	for _, star := range stars {
 		if star.X >= 0 && star.X < width && star.Y >= 0 && star.Y < height {
@@ -98,16 +145,16 @@ func renderStarfieldCanvas(width, height int, stars []fallingStar) string {
 			}
 		}
 		for i := 1; i <= star.Trail; i++ {
-			tx := star.X + i
-			ty := star.Y - i
+			tx := star.X - star.VX*i
+			ty := star.Y - star.VY*i
 			if tx < 0 || tx >= width || ty < 0 || ty >= height {
 				continue
 			}
 			glyph := "."
 			if i == 1 {
-				glyph = "/"
+				glyph = trailGlyphForVector(star.VX, star.VY)
 			}
-			grid[ty][tx] = trail.Render(glyph)
+			grid[ty][tx] = trailStyle.Render(glyph)
 		}
 	}
 

@@ -61,18 +61,44 @@ func renderCard(title, accentColor, content string, width, height int) string {
 		Width(width)
 
 	if height > 0 {
-		style = style.Height(height)
+		// Style.Height applies to the block before borders are drawn; total rows are inner + top + bottom border.
+		innerH := height - style.GetBorderTopSize() - style.GetBorderBottomSize()
+		style = style.Height(maxInt(innerH, 1))
 	}
+
+	hFrame := style.GetHorizontalFrameSize()
+	contentWidth := maxInt(width-hFrame, 1)
 
 	titleStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(accentColor)).
-		Bold(true)
+		Bold(true).
+		Width(contentWidth).
+		MaxWidth(contentWidth)
+
+	titleRendered := titleStyle.Render(title)
+	titleLines := strings.Split(strings.TrimSuffix(titleRendered, "\n"), "\n")
+
+	bodyStyle := lipgloss.NewStyle().
+		Width(contentWidth).
+		MaxWidth(contentWidth)
+
+	if height > 0 {
+		const titleBodyGapLines = 1 // blank JoinVertical element between title and body
+		reserved := style.GetBorderTopSize() + style.GetBorderBottomSize() +
+			style.GetPaddingTop() + style.GetPaddingBottom() +
+			titleBodyGapLines + len(titleLines)
+		bodyMax := height - reserved
+		if bodyMax < 1 {
+			bodyMax = 1
+		}
+		bodyStyle = bodyStyle.MaxHeight(bodyMax)
+	}
 
 	return style.Render(lipgloss.JoinVertical(
 		lipgloss.Left,
-		titleStyle.Render(title),
+		titleRendered,
 		"",
-		content,
+		bodyStyle.Render(content),
 	))
 }
 
