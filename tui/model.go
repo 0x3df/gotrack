@@ -2,12 +2,14 @@ package tui
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"dailytrack/db"
+	"dailytrack/integrations"
 	"dailytrack/models"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -43,6 +45,8 @@ type Model struct {
 	config    *models.Config
 	entries   []models.Entry
 	settings  *settingsWiz
+	stars     []fallingStar
+	rng       *rand.Rand
 
 	// Entry date picker
 	dateForm  *huh.Form
@@ -88,6 +92,7 @@ func InitialModel(cfg *models.Config) Model {
 	m := Model{
 		help: help.New(),
 		vp:   viewport.New(0, 0),
+		rng:  rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	if cfg == nil || !cfg.SetupComplete {
 		m.state = stateSetup
@@ -103,6 +108,9 @@ func InitialModel(cfg *models.Config) Model {
 func (m Model) Init() tea.Cmd {
 	if m.state == stateSetup {
 		return m.setup.Init()
+	}
+	if m.config != nil && m.config.App.Background.StarfieldEnabled {
+		return starfieldTick()
 	}
 	return nil
 }
@@ -120,11 +128,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.vp.Width = msg.Width
 		m.vp.Height = msg.Height - 13 // 13 is approx header + footer height
 		m.syncViewport()
+	case starfieldTickMsg:
+		if m.state == stateDashboard && m.config != nil && m.config.App.Background.StarfieldEnabled {
+			m.stars = stepStars(m.stars, m.width, m.height)
+			m.stars = maybeSpawnStar(m.stars, m.width, m.height, m.rng)
+			return m, starfieldTick()
+		}
 	case setupDoneMsg:
 		m.config = msg.cfg
 		m.state = stateDashboard
 		m.entries, _ = db.GetAllEntries()
 		m.syncViewport()
+		if m.config.App.Background.StarfieldEnabled {
+			return m, starfieldTick()
+		}
 		return m, nil
 	case setupCanceledMsg:
 		m.state = stateDashboard
@@ -134,6 +151,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateDashboard
 		m.settings = nil
 		m.syncViewport()
+		if m.config != nil && m.config.App.Background.StarfieldEnabled {
+			return m, starfieldTick()
+		}
 		return m, nil
 	case settingsRerunSetupMsg:
 		m.settings = nil
@@ -355,10 +375,16 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateDashboard
 		m.entries, _ = db.GetAllEntries()
 		m.syncViewport()
+		if m.config != nil && m.config.App.Background.StarfieldEnabled {
+			return m, starfieldTick()
+		}
 		return m, nil
 	}
 	if m.form.State == huh.StateAborted {
 		m.state = stateDashboard
+		if m.config != nil && m.config.App.Background.StarfieldEnabled {
+			return m, starfieldTick()
+		}
 		return m, nil
 	}
 	return m, cmd
@@ -392,6 +418,10 @@ func (m *Model) saveEntry() {
 	}
 	if err := db.UpsertEntry(entry); err != nil {
 		fmt.Fprintf(os.Stderr, "dailytrack: failed to save entry: %v\n", err)
+		return
+	}
+	if err := integrations.ExportObsidianEntry(m.config, entry); err != nil {
+		fmt.Fprintf(os.Stderr, "dailytrack: failed to export obsidian note: %v\n", err)
 	}
 }
 
@@ -399,6 +429,7 @@ func (m Model) View() string {
 	if m.width == 0 {
 		return "Initializing..."
 	}
+	setActivePalette(m.config)
 	switch m.state {
 	case stateSetup:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
@@ -415,6 +446,9 @@ func (m Model) View() string {
 	default:
 		view := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Top,
 			m.dashboardView())
+		if m.config != nil && m.config.App.Background.StarfieldEnabled {
+			view = applyStarfieldOverlay(view, renderStarfieldCanvas(m.width, m.height, m.stars), true)
+		}
 		// Ensure it doesn't overflow the terminal height, which causes clipping at the top
 		return lipgloss.NewStyle().MaxHeight(m.height).MaxWidth(m.width).Render(view)
 	}
@@ -429,8 +463,9 @@ const banner = `______     ______     ______   ______     ______     ______     
   \/_____/   \/_____/     \/_/   \/_/ /_/   \/_/\/_/   \/_____/   \/_/\/_/`
 
 func (m Model) dashboardView() string {
+	p := palette()
 	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#00ADD8")).Bold(true).
+		Foreground(lipgloss.Color(p.Primary)).Bold(true).
 		Align(lipgloss.Center).Width(m.width).MarginBottom(1).MarginTop(1)
 
 	tabNames := []string{"Overview"}
@@ -443,10 +478,10 @@ func (m Model) dashboardView() string {
 	for i, name := range tabNames {
 		style := lipgloss.NewStyle().Padding(0, 2)
 		if i == m.activeTab {
-			style = style.Background(lipgloss.Color("#00ADD8")).
-				Foreground(lipgloss.Color("#000")).Bold(true)
+			style = style.Background(lipgloss.Color(p.ActiveTabBg)).
+				Foreground(lipgloss.Color(p.ActiveTabFg)).Bold(true)
 		} else {
-			style = style.Foreground(lipgloss.Color("#888"))
+			style = style.Foreground(lipgloss.Color(p.InactiveTab))
 		}
 		tabParts = append(tabParts, style.Render(name))
 	}
@@ -465,9 +500,10 @@ func (m Model) dashboardView() string {
 }
 
 func box(title, content string, width, height int) string {
+	p := palette()
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#444")).
+		BorderForeground(lipgloss.Color(p.Border)).
 		Padding(1, 2).
 		Width(width)
 
@@ -476,7 +512,7 @@ func box(title, content string, width, height int) string {
 	}
 
 	return style.Render(lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#00ADD8")).Bold(true).Render(title),
+		lipgloss.NewStyle().Foreground(lipgloss.Color(p.Primary)).Bold(true).Render(title),
 		"",
 		content,
 	))
@@ -485,8 +521,9 @@ func box(title, content string, width, height int) string {
 // ─── Overview Tab ─────────────────────────────────────────────────────────────
 
 func (m Model) viewOverview() string {
+	p := palette()
 	if len(m.entries) == 0 {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(p.Muted)).
 			Render("No entries yet. Press 'a' to add or edit an entry.")
 	}
 
@@ -498,12 +535,12 @@ func (m Model) viewOverview() string {
 		content := m.categorySummary(cat)
 		color := cat.Color
 		if color == "" {
-			color = "#00ADD8"
+			color = p.Primary
 		}
 		titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Bold(true)
 		rendered := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#444")).
+			BorderForeground(lipgloss.Color(p.Border)).
 			Padding(1, 2).
 			Width(boxWidth).
 			Height(boxHeight).
@@ -528,6 +565,7 @@ func (m Model) viewOverview() string {
 }
 
 func (m Model) categorySummary(cat models.Category) string {
+	p := palette()
 	var lines []string
 	for _, t := range cat.Trackers {
 		switch t.Type {
@@ -539,12 +577,12 @@ func (m Model) categorySummary(cat models.Category) string {
 		case models.TrackerDuration:
 			series := db.NumericSeries(m.entries, t.ID)
 			avg := average(series)
-			color := "#FFF"
+			color := p.Muted
 			if t.Target != nil {
 				if avg >= *t.Target {
-					color = "#00D855"
+					color = p.Success
 				} else {
-					color = "#FF5F87"
+					color = p.Danger
 				}
 			}
 			valStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
@@ -554,12 +592,12 @@ func (m Model) categorySummary(cat models.Category) string {
 			series := db.NumericSeries(m.entries, t.ID)
 			if len(series) > 0 {
 				latest := series[len(series)-1]
-				color := "#FFF"
+				color := p.Muted
 				if t.Target != nil {
 					if latest >= *t.Target {
-						color = "#00D855"
+						color = p.Success
 					} else {
-						color = "#FF5F87"
+						color = p.Danger
 					}
 				}
 				valStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
@@ -638,7 +676,7 @@ func (m Model) viewCategory(cat models.Category) string {
 			if len(series) > 14 {
 				series = series[len(series)-14:]
 			}
-			content := "Recent ratings:\n" + Sparkline(series, "#8B5CF6")
+			content := "Recent ratings:\n" + Sparkline(series, palette().ChartSecondary)
 			if len(series) > 0 {
 				content += fmt.Sprintf("\n\nAvg: %.1f / 5", average(series))
 			}

@@ -23,7 +23,10 @@ ______     ______     ______   ______     ______     ______     __  __
 
 - **Local-first:** all data stays on your machine in a SQLite database.
 - **Dynamic configuration:** build your own tracking system with custom categories and trackers for binary, duration, numeric, rating, and text inputs.
+- **Obsidian export:** optionally mirror dated entries into Markdown notes inside your vault.
+- **Theme support:** switch between GoTrack, Catppuccin, and Nord from settings.
 - **Rich TUI:** full-screen dashboard with heatmaps, rolling trend lines, vertical bar charts, and simple correlation views.
+- **Ambient mode:** optional falling-stars background for the dashboard.
 - **Portable:** zero external runtime dependencies outside the Go ecosystem.
 
 ## Quick Start
@@ -45,6 +48,7 @@ On first launch, GoTrack walks you through a setup wizard so you can:
 
 - `a`: add or edit an entry for any date
 - `s`: open settings and tracking setup
+- `s` settings also manages theme, Obsidian export, and starfield background
 - `h` / `l` or `←` / `→`: switch tabs
 - `j` / `k` or `↓` / `↑`: scroll visualizations
 - `q`: quit

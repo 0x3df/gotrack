@@ -51,6 +51,16 @@ type settingsWiz struct {
 	trackerType      models.TrackerType
 	trackerUnit      string
 	trackerTarget    string
+	appSettings      appSettingsDraft
+	appAction        string
+}
+
+type appSettingsDraft struct {
+	Theme            models.ThemeName
+	ObsidianEnabled  bool
+	ObsidianVault    string
+	ObsidianFolder   string
+	StarfieldEnabled bool
 }
 
 func newSettingsWiz(cfg *models.Config, entries []models.Entry) *settingsWiz {
@@ -64,8 +74,15 @@ func newSettingsWiz(cfg *models.Config, entries []models.Entry) *settingsWiz {
 		pointerPath:    ptr,
 		trackerType:    models.TrackerBinary,
 		mainChoice:     "tracking",
-		appChoice:      "back",
+		appChoice:      "save",
 		trackingChoice: "add-category",
+		appSettings: appSettingsDraft{
+			Theme:            cfg.App.Theme,
+			ObsidianEnabled:  cfg.App.Obsidian.Enabled,
+			ObsidianVault:    cfg.App.Obsidian.VaultPath,
+			ObsidianFolder:   cfg.App.Obsidian.DailyFolder,
+			StarfieldEnabled: cfg.App.Background.StarfieldEnabled,
+		},
 	}
 	w.buildForm()
 	return w
@@ -323,11 +340,30 @@ func (w *settingsWiz) buildForm() {
 
 	case settingsPhaseAppMenu:
 		w.form = huh.NewForm(huh.NewGroup(
+			huh.NewSelect[models.ThemeName]().
+				Title("Theme").
+				Options(themeOptions()...).
+				Value(&w.appSettings.Theme),
+			huh.NewConfirm().
+				Title("Enable Obsidian export").
+				Value(&w.appSettings.ObsidianEnabled),
+			huh.NewInput().
+				Title("Obsidian vault path").
+				Description("Required when Obsidian export is enabled.").
+				Value(&w.appSettings.ObsidianVault),
+			huh.NewInput().
+				Title("Obsidian daily folder").
+				Description("Optional subfolder inside the vault. Leave blank for vault root.").
+				Value(&w.appSettings.ObsidianFolder),
+			huh.NewConfirm().
+				Title("Enable falling-stars background").
+				Value(&w.appSettings.StarfieldEnabled),
 			huh.NewSelect[string]().
-				Title("App Settings").
+				Title("Action").
 				Options(
+					huh.NewOption("Save app settings", "save"),
 					huh.NewOption("Rerun setup", "rerun"),
-					huh.NewOption("Back", "back"),
+					huh.NewOption("Back without saving", "back"),
 				).
 				Value(&w.appChoice),
 		))
@@ -387,8 +423,29 @@ func (w *settingsWiz) advance() tea.Cmd {
 		w.applyTrackerAction()
 		w.phase = settingsPhaseTrackingMenu
 	case settingsPhaseAppMenu:
-		if w.appChoice == "rerun" {
+		switch w.appChoice {
+		case "rerun":
 			return func() tea.Msg { return settingsRerunSetupMsg{} }
+		case "save":
+			if err := applyAppSettings(w.config, w.appSettings); err != nil {
+				w.notice = fmt.Sprintf("App settings blocked: %v", err)
+				w.buildForm()
+				if w.form != nil {
+					return w.form.Init()
+				}
+				return nil
+			}
+			if err := db.SaveConfig(w.config); err != nil {
+				w.notice = fmt.Sprintf("Failed to save config: %v", err)
+				w.buildForm()
+				if w.form != nil {
+					return w.form.Init()
+				}
+				return nil
+			}
+			w.workspace, _ = db.GetWorkspacePath()
+			w.pointerPath, _ = db.GetPointerFilePath()
+			w.notice = "App settings saved."
 		}
 		w.phase = settingsPhaseMenu
 	}
@@ -572,6 +629,14 @@ func categoryOptions(cfg *models.Config) []huh.Option[string] {
 	return opts
 }
 
+func themeOptions() []huh.Option[models.ThemeName] {
+	return []huh.Option[models.ThemeName]{
+		huh.NewOption("GoTrack", models.ThemeGoTrack),
+		huh.NewOption("Catppuccin", models.ThemeCatppuccin),
+		huh.NewOption("Nord", models.ThemeNord),
+	}
+}
+
 func trackerOptions(cat *models.Category) []huh.Option[string] {
 	var opts []huh.Option[string]
 	for _, tracker := range cat.Trackers {
@@ -584,5 +649,27 @@ func categoryColorForName(name string) string {
 	if color, ok := categoryColors[strings.TrimSpace(name)]; ok {
 		return color
 	}
-	return "#00ADD8"
+	return palette().Primary
+}
+
+func applyAppSettings(cfg *models.Config, draft appSettingsDraft) error {
+	if cfg == nil {
+		return fmt.Errorf("missing config")
+	}
+	if !draft.Theme.IsValid() {
+		draft.Theme = models.ThemeGoTrack
+	}
+	draft.ObsidianVault = strings.TrimSpace(draft.ObsidianVault)
+	draft.ObsidianFolder = strings.TrimSpace(draft.ObsidianFolder)
+	if draft.ObsidianEnabled && draft.ObsidianVault == "" {
+		return fmt.Errorf("obsidian vault path is required when export is enabled")
+	}
+
+	cfg.App.Theme = draft.Theme
+	cfg.App.Obsidian.Enabled = draft.ObsidianEnabled
+	cfg.App.Obsidian.VaultPath = draft.ObsidianVault
+	cfg.App.Obsidian.DailyFolder = draft.ObsidianFolder
+	cfg.App.Background.StarfieldEnabled = draft.StarfieldEnabled
+	models.NormalizeAppSettings(&cfg.App)
+	return nil
 }

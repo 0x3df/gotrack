@@ -7,6 +7,7 @@ import (
 )
 
 type TrackerType string
+type ThemeName string
 
 const (
 	TrackerBinary   TrackerType = "binary"
@@ -15,6 +16,10 @@ const (
 	TrackerNumeric  TrackerType = "numeric"  // stored as float64
 	TrackerRating   TrackerType = "rating"   // stored as float64, 1-5
 	TrackerText     TrackerType = "text"     // stored as string
+
+	ThemeGoTrack    ThemeName = "gotrack"
+	ThemeCatppuccin ThemeName = "catppuccin"
+	ThemeNord       ThemeName = "nord"
 )
 
 type Tracker struct {
@@ -29,6 +34,14 @@ type Tracker struct {
 func (t TrackerType) IsValid() bool {
 	switch t {
 	case TrackerBinary, TrackerDuration, TrackerCount, TrackerNumeric, TrackerRating, TrackerText:
+		return true
+	}
+	return false
+}
+
+func (t ThemeName) IsValid() bool {
+	switch t {
+	case ThemeGoTrack, ThemeCatppuccin, ThemeNord:
 		return true
 	}
 	return false
@@ -63,8 +76,31 @@ func NewCategory(name, color string) Category {
 }
 
 type Config struct {
-	SetupComplete bool       `json:"setup_complete"`
-	Categories    []Category `json:"categories"`
+	SetupComplete bool        `json:"setup_complete"`
+	App           AppSettings `json:"app,omitempty"`
+	Categories    []Category  `json:"categories"`
+}
+
+type AppSettings struct {
+	Theme      ThemeName          `json:"theme,omitempty"`
+	Obsidian   ObsidianSettings   `json:"obsidian,omitempty"`
+	Background BackgroundSettings `json:"background,omitempty"`
+}
+
+type ObsidianSettings struct {
+	Enabled     bool   `json:"enabled,omitempty"`
+	VaultPath   string `json:"vault_path,omitempty"`
+	DailyFolder string `json:"daily_folder,omitempty"`
+}
+
+type BackgroundSettings struct {
+	StarfieldEnabled bool `json:"starfield_enabled,omitempty"`
+}
+
+func DefaultAppSettings() AppSettings {
+	return AppSettings{
+		Theme: ThemeGoTrack,
+	}
 }
 
 func DefaultUnit(name string, t TrackerType) string {
@@ -87,6 +123,7 @@ func NormalizeConfig(cfg *Config) {
 	if cfg == nil {
 		return
 	}
+	NormalizeAppSettings(&cfg.App)
 	for catIdx := range cfg.Categories {
 		for trackerIdx := range cfg.Categories[catIdx].Trackers {
 			tracker := &cfg.Categories[catIdx].Trackers[trackerIdx]
@@ -96,6 +133,17 @@ func NormalizeConfig(cfg *Config) {
 			tracker.Unit = DefaultUnit(tracker.Name, tracker.Type)
 		}
 	}
+}
+
+func NormalizeAppSettings(app *AppSettings) {
+	if app == nil {
+		return
+	}
+	if !app.Theme.IsValid() {
+		app.Theme = ThemeGoTrack
+	}
+	app.Obsidian.VaultPath = strings.TrimSpace(app.Obsidian.VaultPath)
+	app.Obsidian.DailyFolder = strings.TrimSpace(app.Obsidian.DailyFolder)
 }
 
 type Entry struct {
