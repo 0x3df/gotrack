@@ -39,11 +39,6 @@ func InitDB() error {
 	}
 	defer db.Close()
 
-	// Drop old table for clean break (removes day_rating column)
-	if _, err := db.Exec(`DROP TABLE IF EXISTS daily_entries`); err != nil {
-		return err
-	}
-
 	schema := `
 	CREATE TABLE IF NOT EXISTS daily_entries (
 		date DATE PRIMARY KEY,

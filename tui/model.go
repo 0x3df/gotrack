@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -181,14 +182,14 @@ func (m *Model) initForm() {
 			case models.TrackerCount:
 				s := ""
 				m.strPtrs[t.ID] = &s
-				fields = append(fields, huh.NewInput().Title(t.Name+" (count)").Value(&s).
+				fields = append(fields, huh.NewInput().Title(t.Name).Value(&s).
 					Validate(func(s string) error {
 						if s == "" {
 							return nil
 						}
-						_, err := strconv.Atoi(s)
-						if err != nil {
-							return fmt.Errorf("enter a whole number")
+						v, err := strconv.ParseFloat(s, 64)
+						if err != nil || v < 0 {
+							return fmt.Errorf("enter a number")
 						}
 						return nil
 					}))
@@ -285,7 +286,9 @@ func (m *Model) saveEntry() {
 		Date: time.Now().Format("2006-01-02"),
 		Data: data,
 	}
-	db.UpsertEntry(entry)
+	if err := db.UpsertEntry(entry); err != nil {
+		fmt.Fprintf(os.Stderr, "dailytrack: failed to save entry: %v\n", err)
+	}
 }
 
 func (m Model) View() string {
@@ -417,7 +420,7 @@ func (m Model) categorySummary(cat models.Category) string {
 		case models.TrackerBinary:
 			streak := db.CurrentStreak(m.entries, t.ID)
 			pct := db.ConsistencyPct(m.entries, t.ID)
-			lines = append(lines, fmt.Sprintf("%-20s %d🔥 %.0f%%", truncate(t.Name, 20), streak, pct))
+			lines = append(lines, fmt.Sprintf("%-20s %d streak  %.0f%%", truncate(t.Name, 20), streak, pct))
 
 		case models.TrackerDuration:
 			series := db.NumericSeries(m.entries, t.ID)

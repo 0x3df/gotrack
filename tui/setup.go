@@ -340,9 +340,8 @@ func (w *setupWiz) Update(msg tea.Msg) tea.Cmd {
 				cfg = w.buildConfig()
 			}
 			if err := db.SaveConfig(cfg); err != nil {
-				// Config save failed — write to stderr so it's visible on crash,
-				// but don't block the user (they'll see setup again on next launch).
 				fmt.Fprintf(os.Stderr, "dailytrack: failed to save config: %v\n", err)
+				return nil // don't proceed — user will see setup again on next launch
 			}
 			if err := db.InitDB(); err != nil {
 				fmt.Fprintf(os.Stderr, "dailytrack: failed to init db: %v\n", err)
