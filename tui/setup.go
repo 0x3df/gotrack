@@ -30,6 +30,7 @@ const (
 	phaseCustomInput               // custom: enter category names
 	phaseCustomTrackers            // custom: build trackers for each category
 	phaseTargets                   // ask for goals/targets
+	phaseAppPrefs                  // app settings: theme/obsidian/background
 	phaseDone
 )
 
@@ -49,6 +50,7 @@ type setupWiz struct {
 	customCatRaw string // newline-separated category names
 	targetUnits  map[string]*string
 	targets      map[string]*string
+	appSettings  appSettingsDraft
 
 	// internal state
 	tempConfig          *models.Config
@@ -72,6 +74,9 @@ func newAbortableSetupWiz(abortMsg tea.Msg) *setupWiz {
 		targetUnits:       make(map[string]*string),
 		targets:           make(map[string]*string),
 		customTrackerType: models.TrackerBinary,
+		appSettings: appSettingsDraft{
+			Theme: models.ThemeGoTrack,
+		},
 		abortMsg:          abortMsg,
 	}
 	w.buildForm()
@@ -292,10 +297,33 @@ func (w *setupWiz) buildForm() {
 			}
 		}
 		if len(fields) == 0 {
-			w.phase = phaseDone
+			w.phase = phaseAppPrefs
+			w.buildForm()
 			return
 		}
 		w.form = huh.NewForm(huh.NewGroup(fields...))
+	case phaseAppPrefs:
+		w.form = huh.NewForm(huh.NewGroup(
+			huh.NewSelect[models.ThemeName]().
+				Title("Theme").
+				Description("Pick your default UI theme.").
+				Options(themeOptions()...).
+				Value(&w.appSettings.Theme),
+			huh.NewConfirm().
+				Title("Enable Obsidian export").
+				Value(&w.appSettings.ObsidianEnabled),
+			huh.NewInput().
+				Title("Obsidian vault path").
+				Description("Required when Obsidian export is enabled.").
+				Value(&w.appSettings.ObsidianVault),
+			huh.NewInput().
+				Title("Obsidian daily folder").
+				Description("Optional subfolder inside the vault. Leave blank for vault root.").
+				Value(&w.appSettings.ObsidianFolder),
+			huh.NewConfirm().
+				Title("Enable falling-stars background").
+				Value(&w.appSettings.StarfieldEnabled),
+		))
 	}
 }
 
@@ -351,7 +379,7 @@ func (w *setupWiz) advance() {
 		}
 		w.customCatIdx++
 		if w.customCatIdx >= len(w.tempConfig.Categories) {
-			w.phase = phaseDone
+			w.phase = phaseAppPrefs
 			break
 		}
 		w.resetCustomTrackerDraft()
@@ -373,6 +401,12 @@ func (w *setupWiz) advance() {
 					cat.Trackers[i].Target = nil
 				}
 			}
+		}
+		w.phase = phaseAppPrefs
+	case phaseAppPrefs:
+		if err := applyAppSettings(w.tempConfig, w.appSettings); err != nil {
+			w.notice = fmt.Sprintf("App settings blocked: %v", err)
+			break
 		}
 		w.phase = phaseDone
 	}
@@ -561,10 +595,11 @@ func (w *setupWiz) View() string {
 	if w.form == nil {
 		return "Setting up..."
 	}
+	header := banner + "\n\nFirst-time setup"
 	if strings.TrimSpace(w.notice) == "" {
-		return w.form.View()
+		return header + "\n\n" + w.form.View()
 	}
-	return w.notice + "\n\n" + w.form.View()
+	return header + "\n\n" + w.notice + "\n\n" + w.form.View()
 }
 
 func (w *setupWiz) resetCustomTrackerDraft() {

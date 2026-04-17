@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -520,6 +521,11 @@ func (m Model) viewOverview() string {
 
 	var cards []string
 
+	cards = append(cards,
+		renderCard("Daily Snapshot", p.Primary, m.overviewSnapshot(), layout.CardWidth, layout.CardHeight),
+		renderCard("Momentum", p.Primary, m.overviewMomentum(), layout.CardWidth, layout.CardHeight),
+	)
+
 	for _, cat := range m.config.Categories {
 		content := m.categorySummary(cat)
 		color := cat.Color
@@ -613,6 +619,13 @@ func (m Model) viewCategory(cat models.Category) string {
 	const limit = 30
 	var boxes []string
 
+	if hitRate := m.categoryTargetHitRate(cat, limit); hitRate != "" {
+		boxes = append(boxes, renderCard("Target Hit Rate (30d)", palette().Primary, hitRate, layout.CardWidth, layout.CardHeight))
+	}
+	if weekday := m.categoryWeekdayConsistency(cat); weekday != "" {
+		boxes = append(boxes, renderCard("Consistency by Weekday", palette().Primary, weekday, layout.CardWidth, layout.CardHeight))
+	}
+
 	for _, t := range cat.Trackers {
 		switch t.Type {
 		case models.TrackerBinary:
@@ -702,6 +715,188 @@ func truncate(s string, max int) string {
 	return s[:max-1] + "…"
 }
 
+func (m Model) overviewSnapshot() string {
+	if len(m.entries) == 0 {
+		return "No entries yet."
+	}
+	latest := m.entries[0]
+	totalTrackers := 0
+	recorded := 0
+	activeStreaks := 0
+	targetHits := 0
+	targetTotal := 0
+
+	for _, cat := range m.config.Categories {
+		for _, t := range cat.Trackers {
+			totalTrackers++
+			if _, ok := latest.Data[t.ID]; ok {
+				recorded++
+			}
+			if t.Type == models.TrackerBinary {
+				if db.CurrentStreak(m.entries, t.ID) > 0 {
+					activeStreaks++
+				}
+			}
+			if t.Target != nil && (t.Type == models.TrackerDuration || t.Type == models.TrackerCount || t.Type == models.TrackerNumeric) {
+				hits, total, _ := db.TargetHitRate(m.entries, t.ID, *t.Target, 30)
+				targetHits += hits
+				targetTotal += total
+			}
+		}
+	}
+
+	coverage := 0.0
+	if totalTrackers > 0 {
+		coverage = float64(recorded) / float64(totalTrackers) * 100
+	}
+
+	return fmt.Sprintf(
+		"Latest entry: %s\nCoverage: %.0f%% (%d/%d)\nActive streaks: %d\nTargets hit (30d): %d/%d",
+		latest.Date, coverage, recorded, totalTrackers, activeStreaks, targetHits, targetTotal,
+	)
+}
+
+func (m Model) overviewMomentum() string {
+	type row struct {
+		name   string
+		recent float64
+		prev   float64
+		delta  float64
+	}
+	var deltas []row
+
+	for _, cat := range m.config.Categories {
+		for _, t := range cat.Trackers {
+			switch t.Type {
+			case models.TrackerDuration, models.TrackerCount, models.TrackerNumeric:
+				recent, prev, delta, ok := db.TrackerMomentum(m.entries, t.ID, 7)
+				if !ok {
+					continue
+				}
+				deltas = append(deltas, row{
+					name:   t.Name,
+					recent: recent,
+					prev:   prev,
+					delta:  delta,
+				})
+			}
+		}
+	}
+	if len(deltas) == 0 {
+		return "Need at least 14 entries on numeric trackers."
+	}
+	sort.Slice(deltas, func(i, j int) bool {
+		return deltas[i].delta > deltas[j].delta
+	})
+	var lines []string
+	for i, d := range deltas {
+		if i >= 3 {
+			break
+		}
+		lines = append(lines, fmt.Sprintf("%s\n%s", truncate(d.name, 20), TrendDeltaStrip(d.recent, d.prev)))
+	}
+	return strings.Join(lines, "\n\n")
+}
+
+func (m Model) categoryTargetHitRate(cat models.Category, window int) string {
+	var blocks []string
+	for _, t := range cat.Trackers {
+		if t.Target == nil {
+			continue
+		}
+		switch t.Type {
+		case models.TrackerDuration, models.TrackerCount, models.TrackerNumeric:
+			hits, total, _ := db.TargetHitRate(m.entries, t.ID, *t.Target, window)
+			blocks = append(blocks, fmt.Sprintf("%s\n%s", truncate(t.Name, 18), TargetHitMeter(hits, total, 22)))
+		}
+	}
+	if len(blocks) == 0 {
+		return ""
+	}
+	return strings.Join(blocks, "\n\n")
+}
+
+func (m Model) categoryWeekdayConsistency(cat models.Category) string {
+	var binTrackers []models.Tracker
+	for _, t := range cat.Trackers {
+		if t.Type == models.TrackerBinary {
+			binTrackers = append(binTrackers, t)
+		}
+	}
+	if len(binTrackers) == 0 {
+		return ""
+	}
+	// Show first binary tracker to keep card compact and readable.
+	t := binTrackers[0]
+	return fmt.Sprintf("%s\n\n%s", truncate(t.Name, 20), WeekdayConsistencyBars(db.BinaryWeekdayConsistency(m.entries, t.ID)))
+}
+
+func (m Model) insightBestWeekday() string {
+	var totals [7]float64
+	var counts [7]int
+	var seen bool
+	for _, cat := range m.config.Categories {
+		for _, t := range cat.Trackers {
+			if t.Type != models.TrackerBinary {
+				continue
+			}
+			seen = true
+			w := db.BinaryWeekdayConsistency(m.entries, t.ID)
+			for i := range totals {
+				if w[i] > 0 {
+					totals[i] += w[i]
+					counts[i]++
+				}
+			}
+		}
+	}
+	if !seen {
+		return "No binary trackers available."
+	}
+	var avg [7]float64
+	for i := range avg {
+		if counts[i] == 0 {
+			continue
+		}
+		avg[i] = totals[i] / float64(counts[i])
+	}
+	days := []string{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
+	bestIdx := 0
+	for i := 1; i < 7; i++ {
+		if avg[i] > avg[bestIdx] {
+			bestIdx = i
+		}
+	}
+	return fmt.Sprintf("Best day: %s\nScore: %.0f%% average\n\n%s", days[bestIdx], avg[bestIdx], WeekdayConsistencyBars(avg))
+}
+
+func (m Model) insightMomentumLeaders() string {
+	type momentum struct {
+		name  string
+		delta float64
+	}
+	var rows []momentum
+	for _, cat := range m.config.Categories {
+		for _, t := range cat.Trackers {
+			switch t.Type {
+			case models.TrackerDuration, models.TrackerCount, models.TrackerNumeric:
+				_, _, delta, ok := db.TrackerMomentum(m.entries, t.ID, 7)
+				if !ok {
+					continue
+				}
+				rows = append(rows, momentum{name: t.Name, delta: delta})
+			}
+		}
+	}
+	if len(rows) == 0 {
+		return "No momentum data yet."
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].delta > rows[j].delta })
+	best := rows[0]
+	worst := rows[len(rows)-1]
+	return fmt.Sprintf("Leader: %s (%.1f)\nLagger: %s (%.1f)", truncate(best.name, 20), best.delta, truncate(worst.name, 20), worst.delta)
+}
+
 // ─── Insights Tab ─────────────────────────────────────────────────────────────
 
 func (m Model) viewInsights() string {
@@ -731,6 +926,8 @@ func (m Model) viewInsights() string {
 
 	var scatterStr = "No numeric/duration tracker found for scatter plot."
 	var compStr = "No binary tracker found for A/B impact."
+	weekdayStr := m.insightBestWeekday()
+	momentumStr := m.insightMomentumLeaders()
 
 	if ratingTracker != nil {
 		if durationTracker != nil {
@@ -777,6 +974,8 @@ func (m Model) viewInsights() string {
 	return renderCardGrid([]string{
 		renderCard("A/B Impact", palette().Primary, compStr, layout.CardWidth, layout.CardHeight),
 		renderCard("Scatter Analysis", palette().Primary, scatterStr, layout.CardWidth, layout.CardHeight),
+		renderCard("Best Day of Week", palette().Primary, weekdayStr, layout.CardWidth, layout.CardHeight),
+		renderCard("Momentum Leaders/Laggers", palette().Primary, momentumStr, layout.CardWidth, layout.CardHeight),
 	}, m.width)
 }
 
