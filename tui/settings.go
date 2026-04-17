@@ -504,6 +504,8 @@ func (w *settingsWiz) applyCategoryAction() {
 			w.notice = "Enter a new category name to rename it."
 			return
 		}
+		oldName := cat.Name
+		renameLanguageTemplateTrackers(cat, oldName, name)
 		cat.Name = name
 		cat.Color = categoryColorForName(name)
 		if err := db.SaveConfig(w.config); err != nil {
@@ -684,5 +686,28 @@ func categoryColorForName(name string) string {
 		return color
 	}
 	return palette().Primary
+}
+
+func renameLanguageTemplateTrackers(cat *models.Category, oldName, newName string) {
+	if cat == nil {
+		return
+	}
+	oldName = strings.TrimSpace(oldName)
+	newName = strings.TrimSpace(newName)
+	if oldName == "" || newName == "" || oldName == newName {
+		return
+	}
+
+	replacements := map[string]string{
+		oldName + " Anki":         newName + " Anki",
+		oldName + " Immersion":    newName + " Immersion",
+		oldName + " Active Study": newName + " Active Study",
+	}
+
+	for i := range cat.Trackers {
+		if renamed, ok := replacements[cat.Trackers[i].Name]; ok {
+			cat.Trackers[i].Name = renamed
+		}
+	}
 }
 

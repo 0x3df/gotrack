@@ -130,3 +130,31 @@ func TestSettingsAdvance_EditTrackerLoadsSelectedTrackerValues(t *testing.T) {
 		t.Fatalf("trackerType = %q, want %q", w.trackerType, models.TrackerText)
 	}
 }
+
+func TestRenameLanguageTemplateTrackers_UpdatesDefaultNamesOnly(t *testing.T) {
+	cat := &models.Category{
+		Name: "Japanese",
+		Trackers: []models.Tracker{
+			{Name: "Japanese Anki"},
+			{Name: "Japanese Immersion"},
+			{Name: "Japanese Active Study"},
+			{Name: "Japanese Grammar Drill"},
+		},
+	}
+
+	renameLanguageTemplateTrackers(cat, "Japanese", "Spanish")
+
+	if cat.Trackers[0].Name != "Spanish Anki" {
+		t.Fatalf("tracker[0] = %q, want %q", cat.Trackers[0].Name, "Spanish Anki")
+	}
+	if cat.Trackers[1].Name != "Spanish Immersion" {
+		t.Fatalf("tracker[1] = %q, want %q", cat.Trackers[1].Name, "Spanish Immersion")
+	}
+	if cat.Trackers[2].Name != "Spanish Active Study" {
+		t.Fatalf("tracker[2] = %q, want %q", cat.Trackers[2].Name, "Spanish Active Study")
+	}
+	// Custom tracker labels should not be force-renamed.
+	if cat.Trackers[3].Name != "Japanese Grammar Drill" {
+		t.Fatalf("tracker[3] = %q, want unchanged custom label", cat.Trackers[3].Name)
+	}
+}
