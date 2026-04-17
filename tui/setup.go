@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+	"os"
 	"strings"
 
 	"dailytrack/db"
@@ -130,11 +132,6 @@ func (w *setupWiz) buildForm() {
 				))
 			}
 		}
-		if len(groups) == 0 {
-			// No picker needed for selected areas (e.g. only Reflection/Languages)
-			w.phase = phaseDone
-			return
-		}
 		w.form = huh.NewForm(groups...)
 
 	case phaseCustomInput:
@@ -166,11 +163,17 @@ func (w *setupWiz) advance() {
 		}
 		if hasLangs {
 			w.phase = phaseDefaultLangs
-		} else {
+		} else if w.needsPicker() {
 			w.phase = phaseDefaultPick
+		} else {
+			w.phase = phaseDone
 		}
 	case phaseDefaultLangs:
-		w.phase = phaseDefaultPick
+		if w.needsPicker() {
+			w.phase = phaseDefaultPick
+		} else {
+			w.phase = phaseDone
+		}
 	case phaseDefaultPick:
 		w.phase = phaseDone
 	case phaseCustomInput:
@@ -179,6 +182,17 @@ func (w *setupWiz) advance() {
 	if w.phase != phaseDone {
 		w.buildForm()
 	}
+}
+
+// needsPicker reports whether any selected area requires a tracker picker form.
+func (w *setupWiz) needsPicker() bool {
+	for _, a := range w.areas {
+		switch a {
+		case "Productivity", "Health", "Personal Care":
+			return true
+		}
+	}
+	return false
 }
 
 // buildConfig assembles a Config from Default Q&A answers.
@@ -283,7 +297,8 @@ func (w *setupWiz) buildConfig() *models.Config {
 func (w *setupWiz) buildCustomConfig() *models.Config {
 	cfg := &models.Config{SetupComplete: true}
 	lines := strings.Split(strings.TrimSpace(w.customCatRaw), "\n")
-	for i, line := range lines {
+	order := 0
+	for _, line := range lines {
 		name := strings.TrimSpace(line)
 		if name == "" {
 			continue
@@ -293,7 +308,8 @@ func (w *setupWiz) buildCustomConfig() *models.Config {
 			color = c
 		}
 		cat := models.NewCategory(name, color)
-		cat.Order = i
+		cat.Order = order
+		order++
 		cfg.Categories = append(cfg.Categories, cat)
 	}
 	return cfg
@@ -323,8 +339,14 @@ func (w *setupWiz) Update(msg tea.Msg) tea.Cmd {
 			} else {
 				cfg = w.buildConfig()
 			}
-			db.SaveConfig(cfg)
-			db.InitDB()
+			if err := db.SaveConfig(cfg); err != nil {
+				// Config save failed — write to stderr so it's visible on crash,
+				// but don't block the user (they'll see setup again on next launch).
+				fmt.Fprintf(os.Stderr, "dailytrack: failed to save config: %v\n", err)
+			}
+			if err := db.InitDB(); err != nil {
+				fmt.Fprintf(os.Stderr, "dailytrack: failed to init db: %v\n", err)
+			}
 			return func() tea.Msg { return setupDoneMsg{cfg: cfg} }
 		}
 		if w.form != nil {
