@@ -1,6 +1,7 @@
 # Binaries
 dailytrack
 gotrack
+.worktrees/
 
 # Local config pointer
 .gotrack_workspace
