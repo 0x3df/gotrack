@@ -25,6 +25,7 @@ const (
 	settingsPhaseAddTracker
 	settingsPhaseEditTrackerCategory
 	settingsPhaseEditTracker
+	settingsPhaseEditTrackerDetails
 	settingsPhaseAppMenu
 )
 
@@ -51,6 +52,16 @@ type settingsWiz struct {
 	trackerType      models.TrackerType
 	trackerUnit      string
 	trackerTarget    string
+	appSettings      appSettingsDraft
+	appAction        string
+}
+
+type appSettingsDraft struct {
+	Theme            models.ThemeName
+	ObsidianEnabled  bool
+	ObsidianVault    string
+	ObsidianFolder   string
+	StarfieldEnabled bool
 }
 
 func newSettingsWiz(cfg *models.Config, entries []models.Entry) *settingsWiz {
@@ -64,8 +75,15 @@ func newSettingsWiz(cfg *models.Config, entries []models.Entry) *settingsWiz {
 		pointerPath:    ptr,
 		trackerType:    models.TrackerBinary,
 		mainChoice:     "tracking",
-		appChoice:      "back",
+		appChoice:      "save",
 		trackingChoice: "add-category",
+		appSettings: appSettingsDraft{
+			Theme:            cfg.App.Theme,
+			ObsidianEnabled:  cfg.App.Obsidian.Enabled,
+			ObsidianVault:    cfg.App.Obsidian.VaultPath,
+			ObsidianFolder:   cfg.App.Obsidian.DailyFolder,
+			StarfieldEnabled: cfg.App.Background.StarfieldEnabled,
+		},
 	}
 	w.buildForm()
 	return w
@@ -191,54 +209,60 @@ func (w *settingsWiz) buildForm() {
 		if findCategory(w.config, w.selectedCategory) == nil {
 			w.selectedCategory = w.config.Categories[0].ID
 		}
-		w.form = huh.NewForm(huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Category").
-				Options(categoryOptions(w.config)...).
-				Value(&w.selectedCategory),
-			huh.NewInput().
-				Title("Tracker name").
-				Value(&w.trackerName).
-				Validate(func(s string) error {
-					if strings.TrimSpace(s) == "" {
-						return fmt.Errorf("enter a tracker name")
-					}
-					return nil
-				}),
-			huh.NewSelect[models.TrackerType]().
-				Title("Tracker type").
-				Options(
-					huh.NewOption("Binary", models.TrackerBinary),
-					huh.NewOption("Duration", models.TrackerDuration),
-					huh.NewOption("Count", models.TrackerCount),
-					huh.NewOption("Numeric", models.TrackerNumeric),
-					huh.NewOption("Rating", models.TrackerRating),
-					huh.NewOption("Text", models.TrackerText),
-				).
-				Value(&w.trackerType),
-			huh.NewInput().
-				Title("Unit").
-				Description("Required for duration, count, and numeric trackers.").
-				Value(&w.trackerUnit).
-				Validate(func(s string) error {
-					if trackerNeedsUnit(w.trackerType) && strings.TrimSpace(s) == "" {
-						return fmt.Errorf("enter a unit")
-					}
-					return nil
-				}),
-			huh.NewInput().
-				Title("Target (optional)").
-				Value(&w.trackerTarget).
-				Validate(func(s string) error {
-					if strings.TrimSpace(s) == "" {
+		w.form = huh.NewForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("Category").
+					Options(categoryOptions(w.config)...).
+					Value(&w.selectedCategory),
+				huh.NewInput().
+					Title("Tracker name").
+					Value(&w.trackerName).
+					Validate(func(s string) error {
+						if strings.TrimSpace(s) == "" {
+							return fmt.Errorf("enter a tracker name")
+						}
 						return nil
-					}
-					if _, err := strconv.ParseFloat(s, 64); err != nil {
-						return fmt.Errorf("must be a number")
-					}
-					return nil
-				}),
-		))
+					}),
+				huh.NewSelect[models.TrackerType]().
+					Title("Tracker type").
+					Options(
+						huh.NewOption("Binary", models.TrackerBinary),
+						huh.NewOption("Duration", models.TrackerDuration),
+						huh.NewOption("Count", models.TrackerCount),
+						huh.NewOption("Numeric", models.TrackerNumeric),
+						huh.NewOption("Rating", models.TrackerRating),
+						huh.NewOption("Text", models.TrackerText),
+					).
+					Value(&w.trackerType),
+			),
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Unit").
+					Description("Required for duration, count, and numeric trackers.").
+					Value(&w.trackerUnit).
+					Validate(func(s string) error {
+						if trackerNeedsUnit(w.trackerType) && strings.TrimSpace(s) == "" {
+							return fmt.Errorf("enter a unit")
+						}
+						return nil
+					}),
+			).WithHideFunc(func() bool { return !trackerNeedsUnit(w.trackerType) }),
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Target (optional)").
+					Value(&w.trackerTarget).
+					Validate(func(s string) error {
+						if strings.TrimSpace(s) == "" {
+							return nil
+						}
+						if _, err := strconv.ParseFloat(s, 64); err != nil {
+							return fmt.Errorf("must be a number")
+						}
+						return nil
+					}),
+			).WithHideFunc(func() bool { return !trackerNeedsUnit(w.trackerType) }),
+		)
 
 	case settingsPhaseEditTrackerCategory:
 		if len(w.config.Categories) == 0 {
@@ -268,7 +292,6 @@ func (w *settingsWiz) buildForm() {
 		if findTracker(cat, w.selectedTracker) == nil {
 			w.selectedTracker = cat.Trackers[0].ID
 		}
-		w.loadSelectedTracker()
 		w.form = huh.NewForm(huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("Tracker").
@@ -283,51 +306,93 @@ func (w *settingsWiz) buildForm() {
 					huh.NewOption("Delete", "delete"),
 				).
 				Value(&w.trackerAction),
-			huh.NewInput().
-				Title("Tracker name (edit only)").
-				Value(&w.trackerName),
-			huh.NewSelect[models.TrackerType]().
-				Title("Tracker type (edit only)").
-				Options(
-					huh.NewOption("Binary", models.TrackerBinary),
-					huh.NewOption("Duration", models.TrackerDuration),
-					huh.NewOption("Count", models.TrackerCount),
-					huh.NewOption("Numeric", models.TrackerNumeric),
-					huh.NewOption("Rating", models.TrackerRating),
-					huh.NewOption("Text", models.TrackerText),
-				).
-				Value(&w.trackerType),
-			huh.NewInput().
-				Title("Unit (edit only)").
-				Description("Required for duration, count, and numeric trackers.").
-				Value(&w.trackerUnit).
-				Validate(func(s string) error {
-					if w.trackerAction == "edit" && trackerNeedsUnit(w.trackerType) && strings.TrimSpace(s) == "" {
-						return fmt.Errorf("enter a unit")
-					}
-					return nil
-				}),
-			huh.NewInput().
-				Title("Target (optional)").
-				Value(&w.trackerTarget).
-				Validate(func(s string) error {
-					if strings.TrimSpace(s) == "" {
-						return nil
-					}
-					if _, err := strconv.ParseFloat(s, 64); err != nil {
-						return fmt.Errorf("must be a number")
-					}
-					return nil
-				}),
 		))
+
+	case settingsPhaseEditTrackerDetails:
+		cat := findCategory(w.config, w.selectedCategory)
+		if cat == nil || findTracker(cat, w.selectedTracker) == nil {
+			w.notice = "Tracker not found."
+			w.phase = settingsPhaseTrackingMenu
+			w.buildForm()
+			return
+		}
+		w.form = huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Tracker name").
+					Value(&w.trackerName).
+					Validate(func(s string) error {
+						if strings.TrimSpace(s) == "" {
+							return fmt.Errorf("enter a tracker name")
+						}
+						return nil
+					}),
+				huh.NewSelect[models.TrackerType]().
+					Title("Tracker type").
+					Options(
+						huh.NewOption("Binary", models.TrackerBinary),
+						huh.NewOption("Duration", models.TrackerDuration),
+						huh.NewOption("Count", models.TrackerCount),
+						huh.NewOption("Numeric", models.TrackerNumeric),
+						huh.NewOption("Rating", models.TrackerRating),
+						huh.NewOption("Text", models.TrackerText),
+					).
+					Value(&w.trackerType),
+			),
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Unit").
+					Description("Required for duration, count, and numeric trackers.").
+					Value(&w.trackerUnit).
+					Validate(func(s string) error {
+						if trackerNeedsUnit(w.trackerType) && strings.TrimSpace(s) == "" {
+							return fmt.Errorf("enter a unit")
+						}
+						return nil
+					}),
+			).WithHideFunc(func() bool { return !trackerNeedsUnit(w.trackerType) }),
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Target (optional)").
+					Value(&w.trackerTarget).
+					Validate(func(s string) error {
+						if strings.TrimSpace(s) == "" {
+							return nil
+						}
+						if _, err := strconv.ParseFloat(s, 64); err != nil {
+							return fmt.Errorf("must be a number")
+						}
+						return nil
+					}),
+			).WithHideFunc(func() bool { return !trackerNeedsUnit(w.trackerType) }),
+		)
 
 	case settingsPhaseAppMenu:
 		w.form = huh.NewForm(huh.NewGroup(
+			huh.NewSelect[models.ThemeName]().
+				Title("Theme").
+				Options(themeOptions()...).
+				Value(&w.appSettings.Theme),
+			huh.NewConfirm().
+				Title("Enable Obsidian export").
+				Value(&w.appSettings.ObsidianEnabled),
+			huh.NewInput().
+				Title("Obsidian vault path").
+				Description("Required when Obsidian export is enabled.").
+				Value(&w.appSettings.ObsidianVault),
+			huh.NewInput().
+				Title("Obsidian daily folder").
+				Description("Optional subfolder inside the vault. Leave blank for vault root.").
+				Value(&w.appSettings.ObsidianFolder),
+			huh.NewConfirm().
+				Title("Enable falling-stars background").
+				Value(&w.appSettings.StarfieldEnabled),
 			huh.NewSelect[string]().
-				Title("App Settings").
+				Title("Action").
 				Options(
+					huh.NewOption("Save app settings", "save"),
 					huh.NewOption("Rerun setup", "rerun"),
-					huh.NewOption("Back", "back"),
+					huh.NewOption("Back without saving", "back"),
 				).
 				Value(&w.appChoice),
 		))
@@ -382,13 +447,47 @@ func (w *settingsWiz) advance() tea.Cmd {
 		w.addTracker()
 		w.phase = settingsPhaseTrackingMenu
 	case settingsPhaseEditTrackerCategory:
+		cat := findCategory(w.config, w.selectedCategory)
+		if cat != nil && len(cat.Trackers) > 0 && findTracker(cat, w.selectedTracker) == nil {
+			w.selectedTracker = cat.Trackers[0].ID
+		}
+		w.trackerAction = "edit"
 		w.phase = settingsPhaseEditTracker
 	case settingsPhaseEditTracker:
+		if w.trackerAction == "edit" {
+			w.loadSelectedTracker()
+			w.phase = settingsPhaseEditTrackerDetails
+		} else {
+			w.applyTrackerAction()
+			w.phase = settingsPhaseTrackingMenu
+		}
+	case settingsPhaseEditTrackerDetails:
 		w.applyTrackerAction()
 		w.phase = settingsPhaseTrackingMenu
 	case settingsPhaseAppMenu:
-		if w.appChoice == "rerun" {
+		switch w.appChoice {
+		case "rerun":
 			return func() tea.Msg { return settingsRerunSetupMsg{} }
+		case "save":
+			if err := applyAppSettings(w.config, w.appSettings); err != nil {
+				w.notice = fmt.Sprintf("App settings blocked: %v", err)
+				w.buildForm()
+				if w.form != nil {
+					return w.form.Init()
+				}
+				return nil
+			}
+			if err := db.SaveConfig(w.config); err != nil {
+				w.notice = fmt.Sprintf("Failed to save config: %v", err)
+				w.buildForm()
+				if w.form != nil {
+					return w.form.Init()
+				}
+				return nil
+			}
+			w.workspace, _ = db.GetWorkspacePath()
+			w.pointerPath, _ = db.GetPointerFilePath()
+			w.notice = "App settings saved."
 		}
 		w.phase = settingsPhaseMenu
 	}
@@ -572,6 +671,14 @@ func categoryOptions(cfg *models.Config) []huh.Option[string] {
 	return opts
 }
 
+func themeOptions() []huh.Option[models.ThemeName] {
+	return []huh.Option[models.ThemeName]{
+		huh.NewOption("GoTrack", models.ThemeGoTrack),
+		huh.NewOption("Catppuccin", models.ThemeCatppuccin),
+		huh.NewOption("Nord", models.ThemeNord),
+	}
+}
+
 func trackerOptions(cat *models.Category) []huh.Option[string] {
 	var opts []huh.Option[string]
 	for _, tracker := range cat.Trackers {
@@ -584,5 +691,27 @@ func categoryColorForName(name string) string {
 	if color, ok := categoryColors[strings.TrimSpace(name)]; ok {
 		return color
 	}
-	return "#00ADD8"
+	return palette().Primary
+}
+
+func applyAppSettings(cfg *models.Config, draft appSettingsDraft) error {
+	if cfg == nil {
+		return fmt.Errorf("missing config")
+	}
+	if !draft.Theme.IsValid() {
+		draft.Theme = models.ThemeGoTrack
+	}
+	draft.ObsidianVault = strings.TrimSpace(draft.ObsidianVault)
+	draft.ObsidianFolder = strings.TrimSpace(draft.ObsidianFolder)
+	if draft.ObsidianEnabled && draft.ObsidianVault == "" {
+		return fmt.Errorf("obsidian vault path is required when export is enabled")
+	}
+
+	cfg.App.Theme = draft.Theme
+	cfg.App.Obsidian.Enabled = draft.ObsidianEnabled
+	cfg.App.Obsidian.VaultPath = draft.ObsidianVault
+	cfg.App.Obsidian.DailyFolder = draft.ObsidianFolder
+	cfg.App.Background.StarfieldEnabled = draft.StarfieldEnabled
+	models.NormalizeAppSettings(&cfg.App)
+	return nil
 }

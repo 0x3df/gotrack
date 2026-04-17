@@ -13,6 +13,7 @@ import (
 
 // ProgressBar returns a string like "[████████░░] 80%"
 func ProgressBar(percent float64, width int) string {
+	p := palette()
 	if math.IsNaN(percent) || math.IsInf(percent, 0) {
 		percent = 0
 	}
@@ -31,8 +32,8 @@ func ProgressBar(percent float64, width int) string {
 	filledBlocks := int(math.Round((percent / 100.0) * float64(totalBlocks)))
 	emptyBlocks := totalBlocks - filledBlocks
 
-	filledStr := lipgloss.NewStyle().Foreground(lipgloss.Color("#00ADD8")).Render(strings.Repeat("█", filledBlocks))
-	emptyStr := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444")).Render(strings.Repeat("░", emptyBlocks))
+	filledStr := lipgloss.NewStyle().Foreground(lipgloss.Color(p.ChartPrimary)).Render(strings.Repeat("█", filledBlocks))
+	emptyStr := lipgloss.NewStyle().Foreground(lipgloss.Color(p.Border)).Render(strings.Repeat("░", emptyBlocks))
 
 	return fmt.Sprintf("[%s%s] %3.0f%%", filledStr, emptyStr, percent)
 }
@@ -75,6 +76,7 @@ func Sparkline(data []float64, color string) string {
 
 // ComparisonBar returns a side-by-side comparison visualization
 func ComparisonBar(labelA string, valA float64, labelB string, valB float64) string {
+	p := palette()
 	max := valA
 	if valB > max {
 		max = valB
@@ -87,8 +89,8 @@ func ComparisonBar(labelA string, valA float64, labelB string, valB float64) str
 	blocksA := int((valA / max) * float64(width))
 	blocksB := int((valB / max) * float64(width))
 
-	barA := lipgloss.NewStyle().Foreground(lipgloss.Color("#00ADD8")).Render(strings.Repeat("█", blocksA))
-	barB := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F87")).Render(strings.Repeat("█", blocksB))
+	barA := lipgloss.NewStyle().Foreground(lipgloss.Color(p.ChartPrimary)).Render(strings.Repeat("█", blocksA))
+	barB := lipgloss.NewStyle().Foreground(lipgloss.Color(p.ChartSecondary)).Render(strings.Repeat("█", blocksB))
 
 	strA := fmt.Sprintf("%-15s | %s %.1f", labelA, barA, valA)
 	strB := fmt.Sprintf("%-15s | %s %.1f", labelB, barB, valB)
@@ -98,6 +100,7 @@ func ComparisonBar(labelA string, valA float64, labelB string, valB float64) str
 
 // Heatmap returns a Github-style contribution grid (7 rows representing days of week, columns are weeks)
 func Heatmap(data []bool, offset int) string {
+	p := palette()
 	if len(data) == 0 {
 		return "No data"
 	}
@@ -116,8 +119,8 @@ func Heatmap(data []bool, offset int) string {
 		}
 	}
 
-	activeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00D855"))
-	inactiveStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
+	activeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(p.HeatmapActive))
+	inactiveStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(p.HeatmapInactive))
 
 	// Map chronological data into columns.
 	for i, done := range padded {
@@ -138,7 +141,7 @@ func Heatmap(data []bool, offset int) string {
 	var result []string
 	dayLabels := []string{"S", "M", "T", "W", "T", "F", "S"}
 	for i := 0; i < 7; i++ {
-		rowStr := lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render(dayLabels[i] + " ")
+		rowStr := lipgloss.NewStyle().Foreground(lipgloss.Color(p.Muted)).Render(dayLabels[i] + " ")
 		rowStr += strings.Join(grid[i], " ")
 		result = append(result, rowStr)
 	}
@@ -149,6 +152,7 @@ func Heatmap(data []bool, offset int) string {
 // VerticalBarChart creates a column-based bar chart.
 // Uses vertical block elements.
 func VerticalBarChart(counts []int, labels []string) string {
+	p := palette()
 	if len(counts) == 0 {
 		return "No data"
 	}
@@ -174,12 +178,12 @@ func VerticalBarChart(counts []int, labels []string) string {
 		if idx >= len(blocks) {
 			idx = len(blocks) - 1
 		}
-		barRow += lipgloss.NewStyle().Foreground(lipgloss.Color("#00ADD8")).Render(blocks[idx]) + "  "
+		barRow += lipgloss.NewStyle().Foreground(lipgloss.Color(p.ChartPrimary)).Render(blocks[idx]) + "  "
 	}
 
 	labelRow := ""
 	for _, l := range labels {
-		labelRow += lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render(l) + " "
+		labelRow += lipgloss.NewStyle().Foreground(lipgloss.Color(p.Muted)).Render(l) + " "
 	}
 
 	return barRow + "\n" + labelRow
@@ -188,6 +192,7 @@ func VerticalBarChart(counts []int, labels []string) string {
 // ScatterPlot visually plots points on a 2D text grid.
 // xVals and yVals must be the same length.
 func ScatterPlot(xVals []float64, yVals []float64, xLabel, yLabel string) string {
+	p := palette()
 	if len(xVals) == 0 || len(xVals) != len(yVals) {
 		return "Invalid or empty data"
 	}
@@ -221,7 +226,7 @@ func ScatterPlot(xVals []float64, yVals []float64, xLabel, yLabel string) string
 	}
 
 	// Plot points
-	dotStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F87")).Bold(true)
+	dotStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(p.ChartSecondary)).Bold(true)
 	for i := range xVals {
 		xIdx := int(math.Round((xVals[i] / maxX) * float64(gridWidth-1)))
 		yIdx := gridHeight - 1 - int(math.Round((yVals[i]/maxY)*float64(gridHeight-1))) // invert Y so 0 is at bottom
@@ -246,7 +251,7 @@ func ScatterPlot(xVals []float64, yVals []float64, xLabel, yLabel string) string
 	var result []string
 
 	// Top Y label
-	result = append(result, lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render(fmt.Sprintf("%v (%.0f max)", yLabel, maxY)))
+	result = append(result, lipgloss.NewStyle().Foreground(lipgloss.Color(p.Muted)).Render(fmt.Sprintf("%v (%.0f max)", yLabel, maxY)))
 
 	for _, row := range grid {
 		result = append(result, "│"+strings.Join(row, ""))
@@ -257,20 +262,23 @@ func ScatterPlot(xVals []float64, yVals []float64, xLabel, yLabel string) string
 
 	// X axis label
 	xLabelLine := fmt.Sprintf("%*s", gridWidth, fmt.Sprintf("%s (%.0f max)", xLabel, maxX))
-	result = append(result, " "+lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render(xLabelLine))
+	result = append(result, " "+lipgloss.NewStyle().Foreground(lipgloss.Color(p.Muted)).Render(xLabelLine))
 
 	return strings.Join(result, "\n")
 }
 
 // renderLineChart renders a line chart for duration/numeric/count trackers.
-func renderLineChart(series []float64, t models.Tracker) string {
+func renderLineChart(series []float64, t models.Tracker, cardWidth int) string {
+	chartWidth := dashboardChartWidth(cardWidth)
+	progressWidth := dashboardProgressWidth(cardWidth)
+
 	if len(series) < 2 {
 		if len(series) == 1 {
 			res := fmt.Sprintf("Latest: %s", formatValueWithUnit(series[0], t))
 			if t.Target != nil {
 				pct := (series[0] / *t.Target) * 100
 				res += fmt.Sprintf("\nTarget: %s\nGoal Completion:\n%s",
-					formatValueWithUnit(*t.Target, t), ProgressBar(pct, 28))
+					formatValueWithUnit(*t.Target, t), ProgressBar(pct, progressWidth))
 			}
 			return res
 		}
@@ -282,7 +290,7 @@ func renderLineChart(series []float64, t models.Tracker) string {
 	if unit != "" {
 		label = fmt.Sprintf("Last %d entries (%s)", len(series), unit)
 	}
-	chart := asciigraph.Plot(series, asciigraph.Height(4), asciigraph.Width(28))
+	chart := asciigraph.Plot(series, asciigraph.Height(4), asciigraph.Width(chartWidth))
 
 	extra := ""
 	if t.Target != nil {
@@ -295,7 +303,7 @@ func renderLineChart(series []float64, t models.Tracker) string {
 			}
 		}
 		extra = fmt.Sprintf("\nLatest Goal: %s\nTarget %s: hit %d/%d days",
-			ProgressBar(pct, 28), formatValueWithUnit(*t.Target, t), hitCount, len(series))
+			ProgressBar(pct, progressWidth), formatValueWithUnit(*t.Target, t), hitCount, len(series))
 	}
 
 	return label + "\n" + chart + extra
