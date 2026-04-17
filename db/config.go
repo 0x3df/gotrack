@@ -9,15 +9,15 @@ import (
 )
 
 func GetConfigPath() (string, error) {
-	home, err := os.UserHomeDir()
+	workspace, err := GetWorkspacePath()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, ".config", "dailytrack")
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", err
+	if workspace == "" {
+		return "", os.ErrNotExist // Or a custom error indicating it's not setup yet
 	}
-	return filepath.Join(dir, "config.json"), nil
+
+	return filepath.Join(workspace, "config.json"), nil
 }
 
 func LoadConfig() (*models.Config, error) {

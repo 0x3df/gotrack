@@ -9,15 +9,14 @@ import (
 )
 
 func GetDBPath() (string, error) {
-	home, err := os.UserHomeDir()
+	workspace, err := GetWorkspacePath()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(home, ".local", "share", "dailytrack")
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", err
+	if workspace == "" {
+		return "", os.ErrNotExist
 	}
-	return filepath.Join(dir, "data.db"), nil
+	return filepath.Join(workspace, "data.db"), nil
 }
 
 func Open() (*sql.DB, error) {

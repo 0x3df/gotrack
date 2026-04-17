@@ -97,13 +97,17 @@ func ComparisonBar(labelA string, valA float64, labelB string, valB float64) str
 }
 
 // Heatmap returns a Github-style contribution grid (7 rows representing days of week, columns are weeks)
-func Heatmap(data []bool) string {
+func Heatmap(data []bool, offset int) string {
 	if len(data) == 0 {
 		return "No data"
 	}
 
+	// Pad data with false based on offset to align with Sunday
+	padded := make([]bool, offset)
+	padded = append(padded, data...)
+
 	// Calculate how many full/partial weeks we have
-	numCols := int(math.Ceil(float64(len(data)) / 7.0))
+	numCols := int(math.Ceil(float64(len(padded)) / 7.0))
 	grid := make([][]string, 7)
 	for i := range grid {
 		grid[i] = make([]string, numCols)
@@ -116,13 +120,14 @@ func Heatmap(data []bool) string {
 	inactiveStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
 	
 	// Map chronological data into columns.
-	// Since data[0] is the oldest entry, it goes in col 0.
-	for i, done := range data {
+	for i, done := range padded {
 		col := i / 7
-		row := i % 7 // Assuming we just stack them straight down for simplicity
+		row := i % 7 // Sunday = 0
 		
 		char := "■"
-		if done {
+		if i < offset {
+			grid[row][col] = " " // Empty space for padding
+		} else if done {
 			grid[row][col] = activeStyle.Render(char)
 		} else {
 			grid[row][col] = inactiveStyle.Render(char)

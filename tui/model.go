@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
@@ -30,6 +31,7 @@ type Model struct {
 	width   int
 	height  int
 	help    help.Model
+	vp      viewport.Model
 
 	// Setup
 	setup *setupWiz
@@ -52,25 +54,32 @@ type keyMap struct {
 	Quit  key.Binding
 	Left  key.Binding
 	Right key.Binding
+	Up    key.Binding
+	Down  key.Binding
 }
 
 var keys = keyMap{
 	Add:   key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add entry")),
 	Left:  key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "prev tab")),
 	Right: key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "next tab")),
+	Up:    key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "scroll up")),
+	Down:  key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "scroll down")),
 	Quit:  key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Left, k.Right, k.Add, k.Quit}
+	return []key.Binding{k.Left, k.Right, k.Up, k.Down, k.Add, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Left, k.Right, k.Add, k.Quit}}
+	return [][]key.Binding{{k.Left, k.Right, k.Up, k.Down, k.Add, k.Quit}}
 }
 
 func InitialModel(cfg *models.Config) Model {
-	m := Model{help: help.New()}
+	m := Model{
+		help: help.New(),
+		vp:   viewport.New(0, 0),
+	}
 	if cfg == nil || !cfg.SetupComplete {
 		m.state = stateSetup
 		m.setup = newSetupWiz()
@@ -99,10 +108,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.help.Width = msg.Width
+		m.vp.Width = msg.Width
+		m.vp.Height = msg.Height - 13 // 13 is approx header + footer height
+		m.syncViewport()
 	case setupDoneMsg:
 		m.config = msg.cfg
 		m.state = stateDashboard
 		m.entries, _ = db.GetAllEntries()
+		m.syncViewport()
 		return m, nil
 	}
 
@@ -118,7 +131,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *Model) syncViewport() {
+	if m.width == 0 || m.config == nil {
+		return
+	}
+	var content string
+	if m.activeTab == 0 {
+		content = m.viewOverview()
+	} else if m.activeTab == len(m.config.Categories)+1 {
+		content = m.viewInsights()
+	} else {
+		cat := m.config.Categories[m.activeTab-1]
+		content = m.viewCategory(cat)
+	}
+	
+	m.vp.SetContent(lipgloss.NewStyle().Align(lipgloss.Center).Width(m.width).Render(content))
+}
+
 func (m Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
@@ -133,14 +164,20 @@ func (m Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.form.Init()
 		case key.Matches(msg, keys.Left):
-			total := len(m.config.Categories) + 1
+			total := len(m.config.Categories) + 2
 			m.activeTab = (m.activeTab - 1 + total) % total
+			m.syncViewport()
+			m.vp.GotoTop()
 		case key.Matches(msg, keys.Right):
-			total := len(m.config.Categories) + 1
+			total := len(m.config.Categories) + 2
 			m.activeTab = (m.activeTab + 1) % total
+			m.syncViewport()
+			m.vp.GotoTop()
 		}
 	}
-	return m, nil
+	
+	m.vp, cmd = m.vp.Update(msg)
+	return m, cmd
 }
 
 func (m *Model) initForm() {
@@ -251,6 +288,7 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.saveEntry()
 		m.state = stateDashboard
 		m.entries, _ = db.GetAllEntries()
+		m.syncViewport()
 		return m, nil
 	}
 	if m.form.State == huh.StateAborted {
@@ -303,28 +341,31 @@ func (m Model) View() string {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			m.form.View())
 	default:
-		return m.dashboardView()
+		view := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Top,
+			m.dashboardView())
+		// Ensure it doesn't overflow the terminal height, which causes clipping at the top
+		return lipgloss.NewStyle().MaxHeight(m.height).MaxWidth(m.width).Render(view)
 	}
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
-const banner = `
-______     ______     ______   ______     ______     ______     __  __
-/\  ___\   /\  __ \   /\__  _\ /\  == \   /\  __ \   /\  ___\   /\ \/ /
-\ \ \__ \  \ \ \/\ \  \/_/\ \/ \ \  __<   \ \  __ \  \ \ \____  \ \  _"-.
- \ \_____\  \ \_____\    \ \_\  \ \_\ \_\  \ \_\ \_\  \ \_____\  \ \_\ \_\
-  \/_____/   \/_____/     \/_/   \/_/ /_/   \/_/\/_/   \/_____/   \/_/\/_/ `
+const banner = `______     ______     ______   ______     ______     ______     __  __    
+/\  ___\   /\  __ \   /\__  _\ /\  == \   /\  __ \   /\  ___\   /\ \/ /    
+\ \ \__ \  \ \ \/\ \  \/_/\ \/ \ \  __<   \ \  __ \  \ \ \____  \ \  _"-.  
+ \ \_____\  \ \_____\    \ \_\  \ \_\ \_\  \ \_\ \_\  \ \_____\  \ \_\ \_\ 
+  \/_____/   \/_____/     \/_/   \/_/ /_/   \/_/\/_/   \/_____/   \/_/\/_/`
 
 func (m Model) dashboardView() string {
 	titleStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#00ADD8")).Bold(true).
-		Align(lipgloss.Center).Width(m.width)
+		Align(lipgloss.Center).Width(m.width).MarginBottom(1).MarginTop(1)
 
 	tabNames := []string{"Overview"}
 	for _, c := range m.config.Categories {
 		tabNames = append(tabNames, c.Name)
 	}
+	tabNames = append(tabNames, "Insights")
 
 	var tabParts []string
 	for i, name := range tabNames {
@@ -340,35 +381,33 @@ func (m Model) dashboardView() string {
 	tabBar := lipgloss.NewStyle().MarginBottom(1).Align(lipgloss.Center).Width(m.width).
 		Render(lipgloss.JoinHorizontal(lipgloss.Top, tabParts...))
 
-	var content string
-	if m.activeTab == 0 {
-		content = m.viewOverview()
-	} else {
-		cat := m.config.Categories[m.activeTab-1]
-		content = m.viewCategory(cat)
-	}
-
-	helpView := lipgloss.NewStyle().MarginTop(2).Align(lipgloss.Center).Width(m.width).
+	helpView := lipgloss.NewStyle().MarginTop(1).Align(lipgloss.Center).Width(m.width).
 		Render(m.help.View(keys))
 
 	return lipgloss.JoinVertical(lipgloss.Center,
 		titleStyle.Render(banner),
 		tabBar,
-		content,
+		m.vp.View(),
 		helpView,
 	)
 }
 
-func box(title, content string, width int) string {
-	return lipgloss.NewStyle().
+func box(title, content string, width, height int) string {
+	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#444")).
-		Padding(1).Width(width).
-		Render(lipgloss.JoinVertical(lipgloss.Left,
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#00ADD8")).Bold(true).Render(title),
-			"",
-			content,
-		))
+		Padding(1, 2).
+		Width(width)
+
+	if height > 0 {
+		style = style.Height(height)
+	}
+
+	return style.Render(lipgloss.JoinVertical(lipgloss.Left,
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#00ADD8")).Bold(true).Render(title),
+		"",
+		content,
+	))
 }
 
 // ─── Overview Tab ─────────────────────────────────────────────────────────────
@@ -380,7 +419,8 @@ func (m Model) viewOverview() string {
 	}
 
 	var cards []string
-	const boxWidth = 30
+	const boxWidth = 40
+	const boxHeight = 8
 
 	for _, cat := range m.config.Categories {
 		content := m.categorySummary(cat)
@@ -392,7 +432,9 @@ func (m Model) viewOverview() string {
 		rendered := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("#444")).
-			Padding(1).Width(boxWidth).
+			Padding(1, 2).
+			Width(boxWidth).
+			Height(boxHeight).
 			Render(lipgloss.JoinVertical(lipgloss.Left,
 				titleStyle.Render(cat.Name), "", content))
 		cards = append(cards, rendered)
@@ -403,8 +445,8 @@ func (m Model) viewOverview() string {
 	}
 
 	var rows []string
-	for i := 0; i < len(cards); i += 3 {
-		end := i + 3
+	for i := 0; i < len(cards); i += 2 {
+		end := i + 2
 		if end > len(cards) {
 			end = len(cards)
 		}
@@ -420,35 +462,35 @@ func (m Model) categorySummary(cat models.Category) string {
 		case models.TrackerBinary:
 			streak := db.CurrentStreak(m.entries, t.ID)
 			pct := db.ConsistencyPct(m.entries, t.ID)
-			lines = append(lines, fmt.Sprintf("%-20s %d streak  %.0f%%", truncate(t.Name, 20), streak, pct))
+			lines = append(lines, fmt.Sprintf("%-22s %d streak  %.0f%%", truncate(t.Name, 22), streak, pct))
 
 		case models.TrackerDuration:
 			series := db.NumericSeries(m.entries, t.ID)
 			avg := average(series)
-			lines = append(lines, fmt.Sprintf("%-20s avg %.0fmin", truncate(t.Name, 20), avg))
+			lines = append(lines, fmt.Sprintf("%-22s avg %.0fmin", truncate(t.Name, 22), avg))
 
 		case models.TrackerNumeric, models.TrackerCount:
 			series := db.NumericSeries(m.entries, t.ID)
 			if len(series) > 0 {
 				latest := series[len(series)-1]
-				lines = append(lines, fmt.Sprintf("%-20s %.1f", truncate(t.Name, 20), latest))
+				lines = append(lines, fmt.Sprintf("%-22s %.1f", truncate(t.Name, 22), latest))
 			}
 
 		case models.TrackerRating:
 			series := db.NumericSeries(m.entries, t.ID)
 			avg := average(series)
 			if len(series) > 0 {
-				lines = append(lines, fmt.Sprintf("%-20s avg %.1f/5", truncate(t.Name, 20), avg))
+				lines = append(lines, fmt.Sprintf("%-22s avg %.1f/5", truncate(t.Name, 22), avg))
 			}
 
 		case models.TrackerText:
 			for _, e := range m.entries {
 				if v, ok := e.Data[t.ID].(string); ok && v != "" {
 					preview := v
-					if len(preview) > 22 {
-						preview = preview[:19] + "..."
+					if len(preview) > 28 {
+						preview = preview[:25] + "..."
 					}
-					lines = append(lines, fmt.Sprintf("%-20s %s", truncate(t.Name, 20), preview))
+					lines = append(lines, fmt.Sprintf("%-22s %s", truncate(t.Name, 22), preview))
 					break
 				}
 			}
@@ -479,9 +521,19 @@ func (m Model) viewCategory(cat models.Category) string {
 			}
 			pct := db.ConsistencyPct(m.entries, t.ID)
 			streak := db.CurrentStreak(m.entries, t.ID)
+			offset := 0
+			if len(heat) > 0 {
+				idx := len(m.entries) - 1
+				if len(m.entries) > limit {
+					idx = limit - 1
+				}
+				if parsed, err := time.Parse("2006-01-02", m.entries[idx].Date); err == nil {
+					offset = int(parsed.Weekday())
+				}
+			}
 			content := fmt.Sprintf("Streak: %d days  |  All-time: %.0f%%\n\n", streak, pct) +
-				Heatmap(heat)
-			boxes = append(boxes, box(t.Name, content, 38))
+				Heatmap(heat, offset)
+			boxes = append(boxes, box(t.Name, content, 42, 14))
 
 		case models.TrackerDuration, models.TrackerNumeric, models.TrackerCount:
 			series := db.NumericSeries(m.entries, t.ID)
@@ -489,7 +541,7 @@ func (m Model) viewCategory(cat models.Category) string {
 				series = series[len(series)-limit:]
 			}
 			content := renderLineChart(series, t)
-			boxes = append(boxes, box(t.Name, content, 38))
+			boxes = append(boxes, box(t.Name, content, 42, 14))
 
 		case models.TrackerRating:
 			series := db.NumericSeries(m.entries, t.ID)
@@ -500,7 +552,7 @@ func (m Model) viewCategory(cat models.Category) string {
 			if len(series) > 0 {
 				content += fmt.Sprintf("\n\nAvg: %.1f / 5", average(series))
 			}
-			boxes = append(boxes, box(t.Name, content, 38))
+			boxes = append(boxes, box(t.Name, content, 42, 14))
 
 		case models.TrackerText:
 			var logs []string
@@ -518,7 +570,7 @@ func (m Model) viewCategory(cat models.Category) string {
 			if content == "" {
 				content = "(no entries yet)"
 			}
-			boxes = append(boxes, box(t.Name, content, 50))
+			boxes = append(boxes, box(t.Name, content, 42, 14))
 		}
 	}
 
@@ -555,4 +607,92 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max-1] + "…"
+}
+
+// ─── Insights Tab ─────────────────────────────────────────────────────────────
+
+func (m Model) viewInsights() string {
+	if len(m.entries) == 0 {
+		return "No data recorded yet."
+	}
+
+	var ratingTracker *models.Tracker
+	var durationTracker *models.Tracker
+	var binaryTracker *models.Tracker
+
+	for _, c := range m.config.Categories {
+		for _, t := range c.Trackers {
+			tracker := t
+			if ratingTracker == nil && t.Type == models.TrackerRating {
+				ratingTracker = &tracker
+			}
+			if durationTracker == nil && t.Type == models.TrackerDuration {
+				durationTracker = &tracker
+			}
+			if binaryTracker == nil && t.Type == models.TrackerBinary {
+				binaryTracker = &tracker
+			}
+		}
+	}
+
+	var scatterStr = "No numeric/duration tracker found for scatter plot."
+	var compStr = "No binary tracker found for A/B impact."
+
+	if ratingTracker != nil {
+		if durationTracker != nil {
+			var scatterX []float64
+			var scatterY []float64
+			for _, e := range m.entries {
+				yVal, okY := e.Data[ratingTracker.ID].(float64)
+				xVal, okX := e.Data[durationTracker.ID].(float64)
+				if okX && okY {
+					scatterX = append(scatterX, xVal)
+					scatterY = append(scatterY, yVal)
+				}
+			}
+			if len(scatterX) > 1 {
+				scatterStr = ScatterPlot(scatterX, scatterY, durationTracker.Name, ratingTracker.Name)
+			} else {
+				scatterStr = "Not enough data for scatter plot."
+			}
+		}
+
+		if binaryTracker != nil {
+			var yesRatings []int
+			var noRatings []int
+			for _, e := range m.entries {
+				yVal, okY := e.Data[ratingTracker.ID].(float64)
+				xVal, okX := e.Data[binaryTracker.ID].(bool)
+				if okX && okY {
+					if xVal {
+						yesRatings = append(yesRatings, int(yVal))
+					} else {
+						noRatings = append(noRatings, int(yVal))
+					}
+				}
+			}
+			avgCodeYes := averageInts(yesRatings)
+			avgCodeNo := averageInts(noRatings)
+			compStr = ComparisonBar("Done", avgCodeYes, "Skipped", avgCodeNo)
+			compStr += fmt.Sprintf("\n\n(%s vs %s)", binaryTracker.Name, ratingTracker.Name)
+		}
+	} else {
+		return "Please add a Rating Tracker to view insights."
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Top,
+		box("A/B Impact", compStr, 45, 14),
+		box("Scatter Analysis", scatterStr, 45, 14),
+	)
+}
+
+func averageInts(nums []int) float64 {
+	if len(nums) == 0 {
+		return 0
+	}
+	sum := 0
+	for _, n := range nums {
+		sum += n
+	}
+	return float64(sum) / float64(len(nums))
 }

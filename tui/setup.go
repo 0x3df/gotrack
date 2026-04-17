@@ -44,7 +44,9 @@ type setupWiz struct {
 }
 
 func newSetupWiz() *setupWiz {
-	w := &setupWiz{}
+	w := &setupWiz{
+		workspace: "~/.dailytrack",
+	}
 	w.buildForm()
 	return w
 }
@@ -53,8 +55,12 @@ func (w *setupWiz) buildForm() {
 	switch w.phase {
 	case phaseWelcome:
 		w.form = huh.NewForm(huh.NewGroup(
+			huh.NewInput().
+				Title("Data Directory").
+				Description("Where should DailyTrack store your database and config?").
+				Value(&w.workspace),
 			huh.NewSelect[string]().
-				Title("Welcome to DailyTrack").
+				Title("Setup Mode").
 				Description("Choose your setup mode").
 				Options(
 					huh.NewOption("Default — guided setup with sensible defaults", "default"),
@@ -363,4 +369,6 @@ func (w *setupWiz) View() string {
 		return "Setting up..."
 	}
 	return w.form.View()
+}
+rn w.form.View()
 }

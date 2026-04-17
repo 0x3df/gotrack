@@ -1,0 +1,13 @@
+# Binaries
+dailytrack
+gotrack
+
+# Local config pointer
+.gotrack_workspace
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
