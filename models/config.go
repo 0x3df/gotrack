@@ -17,11 +17,22 @@ type Tracker struct {
 	ID     string      `json:"id"`
 	Name   string      `json:"name"`
 	Type   TrackerType `json:"type"`
-	Target float64     `json:"target,omitempty"` // 0 = no target
+	Target *float64    `json:"target,omitempty"` // nil = no target
 	Order  int         `json:"order"`
 }
 
+func (t TrackerType) IsValid() bool {
+	switch t {
+	case TrackerBinary, TrackerDuration, TrackerCount, TrackerNumeric, TrackerRating, TrackerText:
+		return true
+	}
+	return false
+}
+
 func NewTracker(name string, t TrackerType) Tracker {
+	if !t.IsValid() {
+		panic("invalid TrackerType: " + string(t))
+	}
 	return Tracker{
 		ID:   uuid.New().String(),
 		Name: name,
@@ -52,5 +63,8 @@ type Config struct {
 
 type Entry struct {
 	Date string                 `json:"date"`
+	// Data maps tracker UUID to its value.
+	// Values must be exactly: bool (binary), float64 (duration/count/numeric/rating), string (text).
+	// Never store int — JSON round-trips will convert it to float64, breaking type assertions.
 	Data map[string]interface{} `json:"data"`
 }
