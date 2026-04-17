@@ -22,7 +22,9 @@ func GetConfigPath() (string, error) {
 
 func LoadConfig() (*models.Config, error) {
 	path, err := GetConfigPath()
-	if err != nil {
+	if os.IsNotExist(err) {
+		return nil, nil
+	} else if err != nil {
 		return nil, err
 	}
 
