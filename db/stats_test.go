@@ -204,3 +204,62 @@ func TestNumericSeries_Empty(t *testing.T) {
 		t.Errorf("want empty slice for nil entries, got %d", len(series))
 	}
 }
+
+func TestTrackerMomentum_Basic(t *testing.T) {
+	entries := []models.Entry{
+		makeEntry("2026-01-06", map[string]interface{}{"abc": float64(6)}),
+		makeEntry("2026-01-05", map[string]interface{}{"abc": float64(5)}),
+		makeEntry("2026-01-04", map[string]interface{}{"abc": float64(4)}),
+		makeEntry("2026-01-03", map[string]interface{}{"abc": float64(3)}),
+		makeEntry("2026-01-02", map[string]interface{}{"abc": float64(2)}),
+		makeEntry("2026-01-01", map[string]interface{}{"abc": float64(1)}),
+	}
+	recentAvg, prevAvg, delta, ok := TrackerMomentum(entries, "abc", 3)
+	if !ok {
+		t.Fatal("TrackerMomentum() ok = false, want true")
+	}
+	if recentAvg != 5 {
+		t.Fatalf("recentAvg = %v, want 5", recentAvg)
+	}
+	if prevAvg != 2 {
+		t.Fatalf("prevAvg = %v, want 2", prevAvg)
+	}
+	if delta != 3 {
+		t.Fatalf("delta = %v, want 3", delta)
+	}
+}
+
+func TestBinaryWeekdayConsistency(t *testing.T) {
+	entries := []models.Entry{
+		makeEntry("2026-01-04", map[string]interface{}{"abc": true}),  // Sunday
+		makeEntry("2026-01-11", map[string]interface{}{"abc": false}), // Sunday
+		makeEntry("2026-01-05", map[string]interface{}{"abc": true}),  // Monday
+		makeEntry("2026-01-12", map[string]interface{}{"abc": true}),  // Monday
+	}
+	weekday := BinaryWeekdayConsistency(entries, "abc")
+	if weekday[0] != 50 {
+		t.Fatalf("Sunday pct = %v, want 50", weekday[0])
+	}
+	if weekday[1] != 100 {
+		t.Fatalf("Monday pct = %v, want 100", weekday[1])
+	}
+	if weekday[2] != 0 {
+		t.Fatalf("Tuesday pct = %v, want 0", weekday[2])
+	}
+}
+
+func TestTargetHitRate_WithLimit(t *testing.T) {
+	entries := []models.Entry{
+		makeEntry("2026-01-06", map[string]interface{}{"abc": float64(30)}),
+		makeEntry("2026-01-05", map[string]interface{}{"abc": float64(20)}),
+		makeEntry("2026-01-04", map[string]interface{}{"abc": float64(10)}),
+		makeEntry("2026-01-03", map[string]interface{}{"abc": float64(40)}),
+	}
+	hits, total, pct := TargetHitRate(entries, "abc", 25, 3)
+	if hits != 1 || total != 3 {
+		t.Fatalf("hits/total = %d/%d, want 1/3", hits, total)
+	}
+	if pct < 33.3 || pct > 33.4 {
+		t.Fatalf("pct = %.3f, want approx 33.333", pct)
+	}
+}

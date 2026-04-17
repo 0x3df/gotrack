@@ -308,3 +308,53 @@ func renderLineChart(series []float64, t models.Tracker, cardWidth int) string {
 
 	return label + "\n" + chart + extra
 }
+
+// TrendDeltaStrip renders a compact delta summary for recent vs previous windows.
+func TrendDeltaStrip(recentAvg, prevAvg float64) string {
+	p := palette()
+	delta := recentAvg - prevAvg
+	sign := "↑"
+	color := p.Success
+	if delta < 0 {
+		sign = "↓"
+		color = p.Danger
+	}
+	if math.Abs(delta) < 0.0001 {
+		sign = "→"
+		color = p.Muted
+	}
+	deltaStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Bold(true)
+	return fmt.Sprintf("Recent: %.1f  Prev: %.1f\nTrend: %s %.1f", recentAvg, prevAvg, deltaStyle.Render(sign), math.Abs(delta))
+}
+
+// TargetHitMeter renders a compact meter for hit-rate cards.
+func TargetHitMeter(hits, total, width int) string {
+	if total <= 0 {
+		return "No target data."
+	}
+	pct := float64(hits) / float64(total) * 100
+	if width <= 0 {
+		width = 24
+	}
+	return fmt.Sprintf("%d/%d hits (%.0f%%)\n%s", hits, total, pct, ProgressBar(pct, width))
+}
+
+// WeekdayConsistencyBars renders weekday completion percentages as compact bars.
+func WeekdayConsistencyBars(weekdayPct [7]float64) string {
+	p := palette()
+	days := []string{"S", "M", "T", "W", "T", "F", "S"}
+	var lines []string
+	for i, pct := range weekdayPct {
+		level := int(math.Round((pct / 100) * 8))
+		if level < 0 {
+			level = 0
+		}
+		if level > 8 {
+			level = 8
+		}
+		bar := strings.Repeat("█", level) + strings.Repeat("░", 8-level)
+		barStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(p.ChartPrimary))
+		lines = append(lines, fmt.Sprintf("%s %s %.0f%%", days[i], barStyle.Render(bar), pct))
+	}
+	return strings.Join(lines, "\n")
+}
