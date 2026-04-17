@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -45,6 +46,38 @@ func TestDashboardLayoutForWidth_DoesNotOverflowNarrowTerminal(t *testing.T) {
 
 	if layout.ContentWidth > 32 {
 		t.Fatalf("layout.ContentWidth = %d, want <= terminal width", layout.ContentWidth)
+	}
+}
+
+func TestRenderCard_UsesRequestedOuterWidth(t *testing.T) {
+	card := renderCard("Productivity", palette().Primary, "Deep Work\n45 minutes", 54, dashboardCardHeight)
+
+	if got := lipgloss.Width(card); got != 54 {
+		t.Fatalf("lipgloss.Width(card) = %d, want 54", got)
+	}
+}
+
+func TestRenderCardGrid_TwoColumnsFitContentWidth(t *testing.T) {
+	layout := dashboardLayoutForWidth(114)
+	cards := []string{
+		renderCard("One", palette().Primary, "a", layout.CardWidth, layout.CardHeight),
+		renderCard("Two", palette().Primary, "b", layout.CardWidth, layout.CardHeight),
+	}
+
+	grid := renderCardGrid(cards, 114)
+	firstLine := ""
+	for _, line := range strings.Split(grid, "\n") {
+		if strings.TrimSpace(ansi.Strip(line)) != "" {
+			firstLine = line
+			break
+		}
+	}
+	if firstLine == "" {
+		t.Fatal("renderCardGrid() returned no visible row")
+	}
+
+	if got := lipgloss.Width(firstLine); got > layout.ContentWidth {
+		t.Fatalf("lipgloss.Width(first row) = %d, want <= %d", got, layout.ContentWidth)
 	}
 }
 

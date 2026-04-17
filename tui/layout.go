@@ -54,11 +54,12 @@ func dashboardLayoutForWidth(totalWidth int) dashboardLayout {
 
 func renderCard(title, accentColor, content string, width, height int) string {
 	p := palette()
+	blockWidth := maxInt(width-2, 1)
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(p.Border)).
 		Padding(1, dashboardCardInnerPadding).
-		Width(width)
+		Width(blockWidth)
 
 	if height > 0 {
 		// Style.Height applies to the block before borders are drawn; total rows are inner + top + bottom border.
