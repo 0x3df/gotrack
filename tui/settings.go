@@ -25,6 +25,7 @@ const (
 	settingsPhaseAddTracker
 	settingsPhaseEditTrackerCategory
 	settingsPhaseEditTracker
+	settingsPhaseEditTrackerDetails
 	settingsPhaseAppMenu
 )
 
@@ -208,54 +209,60 @@ func (w *settingsWiz) buildForm() {
 		if findCategory(w.config, w.selectedCategory) == nil {
 			w.selectedCategory = w.config.Categories[0].ID
 		}
-		w.form = huh.NewForm(huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Category").
-				Options(categoryOptions(w.config)...).
-				Value(&w.selectedCategory),
-			huh.NewInput().
-				Title("Tracker name").
-				Value(&w.trackerName).
-				Validate(func(s string) error {
-					if strings.TrimSpace(s) == "" {
-						return fmt.Errorf("enter a tracker name")
-					}
-					return nil
-				}),
-			huh.NewSelect[models.TrackerType]().
-				Title("Tracker type").
-				Options(
-					huh.NewOption("Binary", models.TrackerBinary),
-					huh.NewOption("Duration", models.TrackerDuration),
-					huh.NewOption("Count", models.TrackerCount),
-					huh.NewOption("Numeric", models.TrackerNumeric),
-					huh.NewOption("Rating", models.TrackerRating),
-					huh.NewOption("Text", models.TrackerText),
-				).
-				Value(&w.trackerType),
-			huh.NewInput().
-				Title("Unit").
-				Description("Required for duration, count, and numeric trackers.").
-				Value(&w.trackerUnit).
-				Validate(func(s string) error {
-					if trackerNeedsUnit(w.trackerType) && strings.TrimSpace(s) == "" {
-						return fmt.Errorf("enter a unit")
-					}
-					return nil
-				}),
-			huh.NewInput().
-				Title("Target (optional)").
-				Value(&w.trackerTarget).
-				Validate(func(s string) error {
-					if strings.TrimSpace(s) == "" {
+		w.form = huh.NewForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("Category").
+					Options(categoryOptions(w.config)...).
+					Value(&w.selectedCategory),
+				huh.NewInput().
+					Title("Tracker name").
+					Value(&w.trackerName).
+					Validate(func(s string) error {
+						if strings.TrimSpace(s) == "" {
+							return fmt.Errorf("enter a tracker name")
+						}
 						return nil
-					}
-					if _, err := strconv.ParseFloat(s, 64); err != nil {
-						return fmt.Errorf("must be a number")
-					}
-					return nil
-				}),
-		))
+					}),
+				huh.NewSelect[models.TrackerType]().
+					Title("Tracker type").
+					Options(
+						huh.NewOption("Binary", models.TrackerBinary),
+						huh.NewOption("Duration", models.TrackerDuration),
+						huh.NewOption("Count", models.TrackerCount),
+						huh.NewOption("Numeric", models.TrackerNumeric),
+						huh.NewOption("Rating", models.TrackerRating),
+						huh.NewOption("Text", models.TrackerText),
+					).
+					Value(&w.trackerType),
+			),
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Unit").
+					Description("Required for duration, count, and numeric trackers.").
+					Value(&w.trackerUnit).
+					Validate(func(s string) error {
+						if trackerNeedsUnit(w.trackerType) && strings.TrimSpace(s) == "" {
+							return fmt.Errorf("enter a unit")
+						}
+						return nil
+					}),
+			).WithHideFunc(func() bool { return !trackerNeedsUnit(w.trackerType) }),
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Target (optional)").
+					Value(&w.trackerTarget).
+					Validate(func(s string) error {
+						if strings.TrimSpace(s) == "" {
+							return nil
+						}
+						if _, err := strconv.ParseFloat(s, 64); err != nil {
+							return fmt.Errorf("must be a number")
+						}
+						return nil
+					}),
+			).WithHideFunc(func() bool { return !trackerNeedsUnit(w.trackerType) }),
+		)
 
 	case settingsPhaseEditTrackerCategory:
 		if len(w.config.Categories) == 0 {
@@ -285,7 +292,6 @@ func (w *settingsWiz) buildForm() {
 		if findTracker(cat, w.selectedTracker) == nil {
 			w.selectedTracker = cat.Trackers[0].ID
 		}
-		w.loadSelectedTracker()
 		w.form = huh.NewForm(huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("Tracker").
@@ -300,43 +306,66 @@ func (w *settingsWiz) buildForm() {
 					huh.NewOption("Delete", "delete"),
 				).
 				Value(&w.trackerAction),
-			huh.NewInput().
-				Title("Tracker name (edit only)").
-				Value(&w.trackerName),
-			huh.NewSelect[models.TrackerType]().
-				Title("Tracker type (edit only)").
-				Options(
-					huh.NewOption("Binary", models.TrackerBinary),
-					huh.NewOption("Duration", models.TrackerDuration),
-					huh.NewOption("Count", models.TrackerCount),
-					huh.NewOption("Numeric", models.TrackerNumeric),
-					huh.NewOption("Rating", models.TrackerRating),
-					huh.NewOption("Text", models.TrackerText),
-				).
-				Value(&w.trackerType),
-			huh.NewInput().
-				Title("Unit (edit only)").
-				Description("Required for duration, count, and numeric trackers.").
-				Value(&w.trackerUnit).
-				Validate(func(s string) error {
-					if w.trackerAction == "edit" && trackerNeedsUnit(w.trackerType) && strings.TrimSpace(s) == "" {
-						return fmt.Errorf("enter a unit")
-					}
-					return nil
-				}),
-			huh.NewInput().
-				Title("Target (optional)").
-				Value(&w.trackerTarget).
-				Validate(func(s string) error {
-					if strings.TrimSpace(s) == "" {
-						return nil
-					}
-					if _, err := strconv.ParseFloat(s, 64); err != nil {
-						return fmt.Errorf("must be a number")
-					}
-					return nil
-				}),
 		))
+
+	case settingsPhaseEditTrackerDetails:
+		cat := findCategory(w.config, w.selectedCategory)
+		if cat == nil || findTracker(cat, w.selectedTracker) == nil {
+			w.notice = "Tracker not found."
+			w.phase = settingsPhaseTrackingMenu
+			w.buildForm()
+			return
+		}
+		w.form = huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Tracker name").
+					Value(&w.trackerName).
+					Validate(func(s string) error {
+						if strings.TrimSpace(s) == "" {
+							return fmt.Errorf("enter a tracker name")
+						}
+						return nil
+					}),
+				huh.NewSelect[models.TrackerType]().
+					Title("Tracker type").
+					Options(
+						huh.NewOption("Binary", models.TrackerBinary),
+						huh.NewOption("Duration", models.TrackerDuration),
+						huh.NewOption("Count", models.TrackerCount),
+						huh.NewOption("Numeric", models.TrackerNumeric),
+						huh.NewOption("Rating", models.TrackerRating),
+						huh.NewOption("Text", models.TrackerText),
+					).
+					Value(&w.trackerType),
+			),
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Unit").
+					Description("Required for duration, count, and numeric trackers.").
+					Value(&w.trackerUnit).
+					Validate(func(s string) error {
+						if trackerNeedsUnit(w.trackerType) && strings.TrimSpace(s) == "" {
+							return fmt.Errorf("enter a unit")
+						}
+						return nil
+					}),
+			).WithHideFunc(func() bool { return !trackerNeedsUnit(w.trackerType) }),
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Target (optional)").
+					Value(&w.trackerTarget).
+					Validate(func(s string) error {
+						if strings.TrimSpace(s) == "" {
+							return nil
+						}
+						if _, err := strconv.ParseFloat(s, 64); err != nil {
+							return fmt.Errorf("must be a number")
+						}
+						return nil
+					}),
+			).WithHideFunc(func() bool { return !trackerNeedsUnit(w.trackerType) }),
+		)
 
 	case settingsPhaseAppMenu:
 		w.form = huh.NewForm(huh.NewGroup(
@@ -418,8 +447,21 @@ func (w *settingsWiz) advance() tea.Cmd {
 		w.addTracker()
 		w.phase = settingsPhaseTrackingMenu
 	case settingsPhaseEditTrackerCategory:
+		cat := findCategory(w.config, w.selectedCategory)
+		if cat != nil && len(cat.Trackers) > 0 && findTracker(cat, w.selectedTracker) == nil {
+			w.selectedTracker = cat.Trackers[0].ID
+		}
+		w.trackerAction = "edit"
 		w.phase = settingsPhaseEditTracker
 	case settingsPhaseEditTracker:
+		if w.trackerAction == "edit" {
+			w.loadSelectedTracker()
+			w.phase = settingsPhaseEditTrackerDetails
+		} else {
+			w.applyTrackerAction()
+			w.phase = settingsPhaseTrackingMenu
+		}
+	case settingsPhaseEditTrackerDetails:
 		w.applyTrackerAction()
 		w.phase = settingsPhaseTrackingMenu
 	case settingsPhaseAppMenu:

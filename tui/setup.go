@@ -192,55 +192,63 @@ func (w *setupWiz) buildForm() {
 		if !w.customTrackerType.IsValid() {
 			w.customTrackerType = models.TrackerBinary
 		}
-		w.form = huh.NewForm(huh.NewGroup(
-			huh.NewInput().
-				Title(fmt.Sprintf("Tracker name (%s)", cat.Name)).
-				Description("Add one tracker at a time. Each category needs at least one tracker.").
-				Value(&w.customTrackerName).
-				Validate(func(s string) error {
-					if strings.TrimSpace(s) == "" {
-						return fmt.Errorf("enter a tracker name")
-					}
-					return nil
-				}),
-			huh.NewSelect[models.TrackerType]().
-				Title("Tracker type").
-				Options(
-					huh.NewOption("Binary", models.TrackerBinary),
-					huh.NewOption("Duration", models.TrackerDuration),
-					huh.NewOption("Count", models.TrackerCount),
-					huh.NewOption("Numeric", models.TrackerNumeric),
-					huh.NewOption("Rating", models.TrackerRating),
-					huh.NewOption("Text", models.TrackerText),
-				).
-				Value(&w.customTrackerType),
-			huh.NewInput().
-				Title("Unit").
-				Description("Required for duration, count, and numeric trackers. Leave blank otherwise.").
-				Value(&w.customTrackerUnit).
-				Validate(func(s string) error {
-					if trackerNeedsUnit(w.customTrackerType) && strings.TrimSpace(s) == "" {
-						return fmt.Errorf("enter a unit")
-					}
-					return nil
-				}),
-			huh.NewInput().
-				Title("Target (optional)").
-				Description("Enter a numeric target or leave blank for none.").
-				Value(&w.customTrackerTarget).
-				Validate(func(s string) error {
-					if strings.TrimSpace(s) == "" {
+		w.form = huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title(fmt.Sprintf("Tracker name (%s)", cat.Name)).
+					Description("Add one tracker at a time. Each category needs at least one tracker.").
+					Value(&w.customTrackerName).
+					Validate(func(s string) error {
+						if strings.TrimSpace(s) == "" {
+							return fmt.Errorf("enter a tracker name")
+						}
 						return nil
-					}
-					if _, err := strconv.ParseFloat(s, 64); err != nil {
-						return fmt.Errorf("must be a number")
-					}
-					return nil
-				}),
-			huh.NewConfirm().
-				Title(fmt.Sprintf("Add another tracker to %s?", cat.Name)).
-				Value(&w.customAddAnother),
-		))
+					}),
+				huh.NewSelect[models.TrackerType]().
+					Title("Tracker type").
+					Options(
+						huh.NewOption("Binary", models.TrackerBinary),
+						huh.NewOption("Duration", models.TrackerDuration),
+						huh.NewOption("Count", models.TrackerCount),
+						huh.NewOption("Numeric", models.TrackerNumeric),
+						huh.NewOption("Rating", models.TrackerRating),
+						huh.NewOption("Text", models.TrackerText),
+					).
+					Value(&w.customTrackerType),
+			),
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Unit").
+					Description("Required for duration, count, and numeric trackers.").
+					Value(&w.customTrackerUnit).
+					Validate(func(s string) error {
+						if trackerNeedsUnit(w.customTrackerType) && strings.TrimSpace(s) == "" {
+							return fmt.Errorf("enter a unit")
+						}
+						return nil
+					}),
+			).WithHideFunc(func() bool { return !trackerNeedsUnit(w.customTrackerType) }),
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Target (optional)").
+					Description("Enter a numeric target or leave blank for none.").
+					Value(&w.customTrackerTarget).
+					Validate(func(s string) error {
+						if strings.TrimSpace(s) == "" {
+							return nil
+						}
+						if _, err := strconv.ParseFloat(s, 64); err != nil {
+							return fmt.Errorf("must be a number")
+						}
+						return nil
+					}),
+			).WithHideFunc(func() bool { return !trackerNeedsUnit(w.customTrackerType) }),
+			huh.NewGroup(
+				huh.NewConfirm().
+					Title(fmt.Sprintf("Add another tracker to %s?", cat.Name)).
+					Value(&w.customAddAnother),
+			),
+		)
 
 	case phaseTargets:
 		w.targetUnits = make(map[string]*string)
@@ -583,7 +591,7 @@ func applyTrackerDetails(tr *models.Tracker, unitInput, targetInput string) {
 	}
 
 	targetInput = strings.TrimSpace(targetInput)
-	if targetInput == "" {
+	if !trackerNeedsUnit(tr.Type) || targetInput == "" {
 		tr.Target = nil
 		return
 	}
