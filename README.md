@@ -1,40 +1,56 @@
-# GoTrack 🚀
+<div align="center">
+  <pre>
+______     ______     ______   ______     ______     ______     __  __
+/\  ___\   /\  __ \   /\__  _\ /\  == \   /\  __ \   /\  ___\   /\ \/ /
+\ \ \__ \  \ \ \/\ \  \/_/\ \/ \ \  __<   \ \  __ \  \ \ \____  \ \  _"-.
+ \ \_____\  \ \_____\    \ \_\  \ \_\ \_\  \ \_\ \_\  \ \_____\  \ \_\ \_\
+  \/_____/   \/_____/     \/_/   \/_/ /_/   \/_/\/_/   \/_____/   \/_/\/_/
+  </pre>
+  <h1>GoTrack</h1>
+  <p><strong>Local-first terminal dashboard for daily tracking, trends, and personal insights.</strong></p>
+</div>
 
-A lightweight, local-first, TUI-based daily tracker and personal dashboard built in Go.
+<div align="center">
+  <a href="https://github.com/0x3df/gotrack"><img src="https://img.shields.io/badge/status-active-22c55e?style=for-the-badge" alt="Status" /></a>
+  <a href="https://go.dev/"><img src="https://img.shields.io/badge/language-go-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go" /></a>
+  <a href="https://github.com/charmbracelet/bubbletea"><img src="https://img.shields.io/badge/tui-bubble%20tea-ff75b5?style=for-the-badge" alt="Bubble Tea" /></a>
+  <a href="https://modernc.org/sqlite"><img src="https://img.shields.io/badge/storage-sqlite-0f766e?style=for-the-badge&logo=sqlite&logoColor=white" alt="SQLite" /></a>
+  <a href="https://github.com/guptarohit/asciigraph"><img src="https://img.shields.io/badge/charts-asciigraph-111827?style=for-the-badge" alt="Asciigraph" /></a>
+  <a href="https://github.com/spf13/cobra"><img src="https://img.shields.io/badge/cli-cobra-2563eb?style=for-the-badge" alt="Cobra" /></a>
+</div>
 
-## Features
+## Highlights
 
-- **Local-First:** All data stays on your machine in a SQLite database.
-- **Dynamic Configuration:** Build your own tracking system with custom categories and trackers (binary, duration, numeric, rating, text).
-- **Rich TUI:** A full-screen interactive dashboard with:
-  - **Heatmaps:** GitHub-style contribution grids for habit consistency.
-  - **Trends:** Rolling line charts and vertical bar charts.
-  - **Insights:** Correlation analysis (Scatter plots and A/B impact charts).
-- **Portable:** Zero dependencies outside of the Go ecosystem (pure Go SQLite).
+- **Local-first:** all data stays on your machine in a SQLite database.
+- **Dynamic configuration:** build your own tracking system with custom categories and trackers for binary, duration, numeric, rating, and text inputs.
+- **Rich TUI:** full-screen dashboard with heatmaps, rolling trend lines, vertical bar charts, and simple correlation views.
+- **Portable:** zero external runtime dependencies outside the Go ecosystem.
 
-## Installation
+## Quick Start
 
 ```bash
-go build -o gotrack main.go
+go build -o gotrack .
 ./gotrack
 ```
 
-## How it works
+## First Launch
 
-On first launch, GoTrack will walk you through a setup wizard where you can:
-1. Choose a **Data Directory** to store your workspace (config and database).
-2. Choose a **Setup Mode** (Default guided or Custom).
-3. Configure your Categories (e.g., Languages, Health, Productivity).
+On first launch, GoTrack walks you through a setup wizard so you can:
 
-Use the following keys to navigate the dashboard:
-- `a`: Add a new daily entry.
-- `h` / `l` or `←` / `→`: Switch between tabs.
-- `j` / `k` or `↓` / `↑`: Scroll through your visualizations.
-- `q`: Quit.
+1. Choose a data directory for your workspace, config, and database.
+2. Pick a setup mode: guided defaults or custom from scratch.
+3. Define the categories and trackers you want on the dashboard.
 
-## Tech Stack
+## Controls
+
+- `a`: add a new daily entry
+- `h` / `l` or `←` / `→`: switch tabs
+- `j` / `k` or `↓` / `↑`: scroll visualizations
+- `q`: quit
+
+## Stack
 
 - **Go**
-- **Bubble Tea / Lipgloss / Huh** (Terminal UI)
-- **SQLite** (modernc.org/sqlite)
-- **Asciigraph** (Line charts)
+- **Bubble Tea / Lipgloss / Huh**
+- **SQLite** via `modernc.org/sqlite`
+- **Asciigraph**

@@ -246,7 +246,12 @@ func ScatterPlot(xVals []float64, yVals []float64, xLabel, yLabel string) string
 func renderLineChart(series []float64, t models.Tracker) string {
 	if len(series) < 2 {
 		if len(series) == 1 {
-			return fmt.Sprintf("Latest: %.1f", series[0])
+			res := fmt.Sprintf("Latest: %.1f", series[0])
+			if t.Target != nil {
+				pct := (series[0] / *t.Target) * 100
+				res += "\nGoal Completion:\n" + ProgressBar(pct, 28)
+			}
+			return res
 		}
 		return "Not enough data yet."
 	}
@@ -260,13 +265,16 @@ func renderLineChart(series []float64, t models.Tracker) string {
 
 	extra := ""
 	if t.Target != nil {
+		latest := series[len(series)-1]
+		pct := (latest / *t.Target) * 100
 		hitCount := 0
 		for _, v := range series {
 			if v >= *t.Target {
 				hitCount++
 			}
 		}
-		extra = fmt.Sprintf("\nTarget %.0f: hit %d/%d days", *t.Target, hitCount, len(series))
+		extra = fmt.Sprintf("\nLatest Goal: %s\nTarget %.0f: hit %d/%d days",
+			ProgressBar(pct, 28), *t.Target, hitCount, len(series))
 	}
 
 	return label + "\n" + chart + extra

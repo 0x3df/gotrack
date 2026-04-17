@@ -467,13 +467,31 @@ func (m Model) categorySummary(cat models.Category) string {
 		case models.TrackerDuration:
 			series := db.NumericSeries(m.entries, t.ID)
 			avg := average(series)
-			lines = append(lines, fmt.Sprintf("%-22s avg %.0fmin", truncate(t.Name, 22), avg))
+			color := "#FFF"
+			if t.Target != nil {
+				if avg >= *t.Target {
+					color = "#00D855"
+				} else {
+					color = "#FF5F87"
+				}
+			}
+			valStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+			lines = append(lines, fmt.Sprintf("%-22s avg %smin", truncate(t.Name, 22), valStyle.Render(fmt.Sprintf("%.0f", avg))))
 
 		case models.TrackerNumeric, models.TrackerCount:
 			series := db.NumericSeries(m.entries, t.ID)
 			if len(series) > 0 {
 				latest := series[len(series)-1]
-				lines = append(lines, fmt.Sprintf("%-22s %.1f", truncate(t.Name, 22), latest))
+				color := "#FFF"
+				if t.Target != nil {
+					if latest >= *t.Target {
+						color = "#00D855"
+					} else {
+						color = "#FF5F87"
+					}
+				}
+				valStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+				lines = append(lines, fmt.Sprintf("%-22s %s", truncate(t.Name, 22), valStyle.Render(fmt.Sprintf("%.1f", latest))))
 			}
 
 		case models.TrackerRating:

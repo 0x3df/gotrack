@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"dailytrack/db"
@@ -25,6 +26,7 @@ const (
 	phaseDefaultLangs            // which languages (if Languages selected)
 	phaseDefaultPick             // toggle specific trackers per area
 	phaseCustomInput             // custom: enter category names
+	phaseTargets                 // ask for goals/targets
 	phaseDone
 )
 
@@ -34,6 +36,7 @@ type setupWiz struct {
 	form  *huh.Form
 
 	// form binding targets
+	workspace    string
 	mode         string
 	areas        []string
 	languages    []string
@@ -41,11 +44,16 @@ type setupWiz struct {
 	healthPicks  []string
 	carePicks    []string
 	customCatRaw string // newline-separated category names
+	targets      map[string]*string
+
+	// internal state
+	tempConfig *models.Config
 }
 
 func newSetupWiz() *setupWiz {
 	w := &setupWiz{
 		workspace: "~/.dailytrack",
+		targets:   make(map[string]*string),
 	}
 	w.buildForm()
 	return w
@@ -147,6 +155,36 @@ func (w *setupWiz) buildForm() {
 				Description("Enter one category name per line.\nYou can add trackers after setup.").
 				Value(&w.customCatRaw),
 		))
+
+	case phaseTargets:
+		var fields []huh.Field
+		for _, cat := range w.tempConfig.Categories {
+			for _, t := range cat.Trackers {
+				if t.Type == models.TrackerDuration || t.Type == models.TrackerCount || t.Type == models.TrackerNumeric {
+					s := ""
+					w.targets[t.ID] = &s
+					fields = append(fields, huh.NewInput().
+						Title(fmt.Sprintf("Target for %s (%s)", t.Name, cat.Name)).
+						Description("Leave blank for no target").
+						Value(&s).
+						Validate(func(s string) error {
+							if s == "" {
+								return nil
+							}
+							_, err := strconv.ParseFloat(s, 64)
+							if err != nil {
+								return fmt.Errorf("must be a number")
+							}
+							return nil
+						}))
+				}
+			}
+		}
+		if len(fields) == 0 {
+			w.phase = phaseDone
+			return
+		}
+		w.form = huh.NewForm(huh.NewGroup(fields...))
 	}
 }
 
@@ -172,17 +210,32 @@ func (w *setupWiz) advance() {
 		} else if w.needsPicker() {
 			w.phase = phaseDefaultPick
 		} else {
-			w.phase = phaseDone
+			w.tempConfig = w.buildConfig()
+			w.phase = phaseTargets
 		}
 	case phaseDefaultLangs:
 		if w.needsPicker() {
 			w.phase = phaseDefaultPick
 		} else {
-			w.phase = phaseDone
+			w.tempConfig = w.buildConfig()
+			w.phase = phaseTargets
 		}
 	case phaseDefaultPick:
-		w.phase = phaseDone
+		w.tempConfig = w.buildConfig()
+		w.phase = phaseTargets
 	case phaseCustomInput:
+		w.tempConfig = w.buildCustomConfig()
+		w.phase = phaseTargets
+	case phaseTargets:
+		// Apply targets to tempConfig
+		for _, cat := range w.tempConfig.Categories {
+			for i, t := range cat.Trackers {
+				if s, ok := w.targets[t.ID]; ok && *s != "" {
+					val, _ := strconv.ParseFloat(*s, 64)
+					cat.Trackers[i].Target = &val
+				}
+			}
+		}
 		w.phase = phaseDone
 	}
 	if w.phase != phaseDone {
@@ -339,11 +392,10 @@ func (w *setupWiz) Update(msg tea.Msg) tea.Cmd {
 	if w.form.State == huh.StateCompleted {
 		w.advance()
 		if w.phase == phaseDone {
-			var cfg *models.Config
-			if w.mode == "custom" {
-				cfg = w.buildCustomConfig()
-			} else {
-				cfg = w.buildConfig()
+			cfg := w.tempConfig
+			if err := db.SetWorkspacePath(w.workspace); err != nil {
+				fmt.Fprintf(os.Stderr, "dailytrack: failed to set workspace: %v\n", err)
+				return nil
 			}
 			if err := db.SaveConfig(cfg); err != nil {
 				fmt.Fprintf(os.Stderr, "dailytrack: failed to save config: %v\n", err)
@@ -369,6 +421,4 @@ func (w *setupWiz) View() string {
 		return "Setting up..."
 	}
 	return w.form.View()
-}
-rn w.form.View()
 }
