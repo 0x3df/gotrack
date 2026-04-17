@@ -160,3 +160,47 @@ func TestCurrentStreak_MissingBreaksStreak(t *testing.T) {
 		t.Errorf("want 1 (missing breaks streak), got %d", streak)
 	}
 }
+
+func TestBinaryStats_Empty(t *testing.T) {
+	done, total := BinaryStats(nil, "abc")
+	if done != 0 || total != 0 {
+		t.Errorf("want 0,0 for nil entries, got %d,%d", done, total)
+	}
+}
+
+func TestConsistencyPct_AllTrackerAbsent(t *testing.T) {
+	entries := []models.Entry{
+		makeEntry("2026-01-02", map[string]interface{}{"other": true}),
+		makeEntry("2026-01-01", map[string]interface{}{"other": false}),
+	}
+	pct := ConsistencyPct(entries, "abc")
+	if pct != 0.0 {
+		t.Errorf("want 0.0 when tracker absent in all entries, got %f", pct)
+	}
+}
+
+func TestCurrentStreak_Empty(t *testing.T) {
+	streak := CurrentStreak(nil, "abc")
+	if streak != 0 {
+		t.Errorf("want 0 for nil entries, got %d", streak)
+	}
+}
+
+func TestCurrentStreak_AllTrue(t *testing.T) {
+	entries := []models.Entry{
+		makeEntry("2026-01-03", map[string]interface{}{"abc": true}),
+		makeEntry("2026-01-02", map[string]interface{}{"abc": true}),
+		makeEntry("2026-01-01", map[string]interface{}{"abc": true}),
+	}
+	streak := CurrentStreak(entries, "abc")
+	if streak != 3 {
+		t.Errorf("want streak=3, got %d", streak)
+	}
+}
+
+func TestNumericSeries_Empty(t *testing.T) {
+	series := NumericSeries(nil, "abc")
+	if len(series) != 0 {
+		t.Errorf("want empty slice for nil entries, got %d", len(series))
+	}
+}

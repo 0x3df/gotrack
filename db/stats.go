@@ -61,7 +61,7 @@ func BinaryHeatmap(entries []models.Entry, trackerID string) []bool {
 		revIdx := n - 1 - i
 		v, ok := e.Data[trackerID]
 		if !ok {
-			result[revIdx] = false
+			result[revIdx] = false // explicit: missing tracker treated as false (same as zero value, here for clarity)
 			continue
 		}
 		if b, ok := v.(bool); ok {
