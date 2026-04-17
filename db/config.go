@@ -39,6 +39,7 @@ func LoadConfig() (*models.Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
+	models.NormalizeConfig(&cfg)
 	return &cfg, nil
 }
 
@@ -47,6 +48,7 @@ func SaveConfig(cfg *models.Config) error {
 	if err != nil {
 		return err
 	}
+	models.NormalizeConfig(cfg)
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
