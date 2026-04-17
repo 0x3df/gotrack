@@ -43,6 +43,7 @@ type Model struct {
 	boolPtrs map[string]*bool
 	strPtrs  map[string]*string
 	intPtrs  map[string]*int
+	textIDs  map[string]bool
 }
 
 type keyMap struct {
@@ -145,6 +146,7 @@ func (m *Model) initForm() {
 	m.boolPtrs = make(map[string]*bool)
 	m.strPtrs = make(map[string]*string)
 	m.intPtrs = make(map[string]*int)
+	m.textIDs = make(map[string]bool)
 
 	var groups []*huh.Group
 
@@ -170,7 +172,7 @@ func (m *Model) initForm() {
 							return nil
 						}
 						v, err := strconv.ParseFloat(s, 64)
-						if err != nil || v < 0 {
+						if err != nil || v <= 0 {
 							return fmt.Errorf("enter a positive number")
 						}
 						return nil
@@ -223,6 +225,7 @@ func (m *Model) initForm() {
 			case models.TrackerText:
 				s := ""
 				m.strPtrs[t.ID] = &s
+				m.textIDs[t.ID] = true
 				fields = append(fields, huh.NewText().Title(t.Name).Value(&s))
 			}
 		}
@@ -266,7 +269,9 @@ func (m *Model) saveEntry() {
 		if *ptr == "" {
 			continue
 		}
-		if v, err := strconv.ParseFloat(*ptr, 64); err == nil {
+		if m.textIDs[id] {
+			data[id] = *ptr
+		} else if v, err := strconv.ParseFloat(*ptr, 64); err == nil {
 			data[id] = v
 		} else {
 			data[id] = *ptr
