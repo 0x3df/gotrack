@@ -248,6 +248,10 @@ func (m *Model) initDateForm() {
 }
 
 func (m *Model) updateDateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
+		m.state = stateDashboard
+		return m, nil
+	}
 	form, cmd := m.dateForm.Update(msg)
 	if f, ok := form.(*huh.Form); ok {
 		m.dateForm = f
@@ -370,6 +374,10 @@ func (m *Model) initForm(entry *models.Entry) {
 }
 
 func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
+		m.state = stateDashboard
+		return m, nil
+	}
 	form, cmd := m.form.Update(msg)
 	if f, ok := form.(*huh.Form); ok {
 		m.form = f
@@ -651,18 +659,12 @@ func (m Model) viewCategory(cat models.Category) string {
 
 		case models.TrackerDuration, models.TrackerNumeric, models.TrackerCount:
 			series := db.NumericSeries(m.entries, t.ID)
-			if len(series) > limit {
-				series = series[len(series)-limit:]
-			}
 			content := renderLineChart(series, t, layout.CardWidth)
 			boxes = append(boxes, renderCard(t.Name, palette().Primary, content, layout.CardWidth, layout.CardHeight))
 
 		case models.TrackerRating:
 			series := db.NumericSeries(m.entries, t.ID)
-			if len(series) > 14 {
-				series = series[len(series)-14:]
-			}
-			content := "Recent ratings:\n" + Sparkline(series, palette().ChartSecondary)
+			content := renderLineChart(series, t, layout.CardWidth)
 			if len(series) > 0 {
 				content += fmt.Sprintf("\n\nAvg: %.1f / 5", average(series))
 			}

@@ -47,11 +47,17 @@ On first launch, GoTrack walks you through a setup wizard so you can:
 ## Controls
 
 - `a`: add or edit an entry for any date
+- `esc`: cancel date/entry form and return to dashboard
 - `s`: open settings and tracking setup
 - `s` settings also manages theme, Obsidian export, and starfield background
 - `h` / `l` or `←` / `→`: switch tabs
 - `j` / `k` or `↓` / `↑`: scroll visualizations
 - `q`: quit
+
+## Data Persistence
+
+- GoTrack stores your database and config in the workspace you chose on first launch.
+- Rebuilding or replacing the `gotrack` binary does not delete this workspace or wipe your data.
 
 ## Stack
 
