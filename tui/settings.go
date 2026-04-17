@@ -300,7 +300,13 @@ func (w *settingsWiz) buildForm() {
 			huh.NewInput().
 				Title("Unit (edit only)").
 				Description("Required for duration, count, and numeric trackers.").
-				Value(&w.trackerUnit),
+				Value(&w.trackerUnit).
+				Validate(func(s string) error {
+					if w.trackerAction == "edit" && trackerNeedsUnit(w.trackerType) && strings.TrimSpace(s) == "" {
+						return fmt.Errorf("enter a unit")
+					}
+					return nil
+				}),
 			huh.NewInput().
 				Title("Target (optional)").
 				Value(&w.trackerTarget).
