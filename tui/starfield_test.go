@@ -2,6 +2,7 @@ package tui
 
 import (
 	"math/rand"
+	"strings"
 	"testing"
 )
 
@@ -117,5 +118,48 @@ func TestApplyStarfieldOverlay_PreservesForegroundContent(t *testing.T) {
 	want := "..BOX..\n***...."
 	if got != want {
 		t.Fatalf("applyStarfieldOverlay() = %q, want %q", got, want)
+	}
+}
+
+func TestStepTwinkles_AdvancesAndMaintainsPopulation(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	tw := []twinkleStar{{X: 2, Y: 2, Phase: 1}}
+	next := stepTwinkles(tw, 20, 10, rng)
+	if len(next) == 0 {
+		t.Fatal("stepTwinkles() returned empty slice")
+	}
+	if next[0].Phase == 1 {
+		t.Fatalf("phase did not advance, got %d", next[0].Phase)
+	}
+}
+
+func TestBurstParticles_SpawnAndDecay(t *testing.T) {
+	rng := rand.New(rand.NewSource(2))
+	parts := spawnBurstParticles(40, 20, 10, 10, rng)
+	if len(parts) == 0 {
+		t.Fatal("spawnBurstParticles() returned no particles")
+	}
+	next := stepBurstParticles(parts, 40, 20)
+	if len(next) == 0 {
+		t.Fatal("stepBurstParticles() removed all particles too early")
+	}
+	for i := range 6 {
+		next = stepBurstParticles(next, 40, 20)
+		_ = i
+	}
+	if len(next) != 0 {
+		t.Fatalf("particles should decay to zero, got %d", len(next))
+	}
+}
+
+func TestRenderStarfieldCanvas_IncludesTwinkleAndBurst(t *testing.T) {
+	canvas := renderStarfieldCanvas(
+		20, 8,
+		nil,
+		[]twinkleStar{{X: 1, Y: 1, Phase: 6}},
+		[]burstParticle{{X: 2, Y: 2, Bright: true, Life: 2}},
+	)
+	if strings.TrimSpace(canvas) == "" {
+		t.Fatal("renderStarfieldCanvas() should contain rendered glyphs")
 	}
 }

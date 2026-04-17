@@ -290,7 +290,18 @@ func renderLineChart(series []float64, t models.Tracker, cardWidth int) string {
 	if unit != "" {
 		label = fmt.Sprintf("Last %d entries (%s)", len(series), unit)
 	}
-	chart := asciigraph.Plot(series, asciigraph.Height(4), asciigraph.Width(chartWidth))
+	chartSeries := series
+	if len(series) > 7 {
+		chartSeries = dbRollingAverage(series, 7)
+	}
+	chart := asciigraph.Plot(chartSeries, asciigraph.Height(4), asciigraph.Width(chartWidth))
+	if t.Target != nil {
+		targetLine := make([]float64, len(chartSeries))
+		for i := range targetLine {
+			targetLine[i] = *t.Target
+		}
+		chart = DualLineChart(chartSeries, targetLine, chartWidth, 4)
+	}
 
 	extra := ""
 	if t.Target != nil {
@@ -307,6 +318,104 @@ func renderLineChart(series []float64, t models.Tracker, cardWidth int) string {
 	}
 
 	return label + "\n" + chart + extra
+}
+
+// DualLineChart renders two series in the same chart area.
+func DualLineChart(primary, secondary []float64, width, height int) string {
+	if len(primary) == 0 {
+		return "Not enough data yet."
+	}
+	if width <= 0 {
+		width = 24
+	}
+	if height <= 0 {
+		height = 4
+	}
+	if len(secondary) == 0 {
+		return asciigraph.Plot(primary, asciigraph.Width(width), asciigraph.Height(height))
+	}
+	return asciigraph.PlotMany(
+		[][]float64{primary, secondary},
+		asciigraph.Width(width),
+		asciigraph.Height(height),
+	)
+}
+
+// LeaderboardBars renders ranked momentum rows.
+func LeaderboardBars(rows []LeaderboardRow, barWidth int) string {
+	if len(rows) == 0 {
+		return "No momentum data yet."
+	}
+	if barWidth <= 0 {
+		barWidth = 12
+	}
+	maxAbs := 0.0
+	for _, r := range rows {
+		if math.Abs(r.Delta) > maxAbs {
+			maxAbs = math.Abs(r.Delta)
+		}
+	}
+	if maxAbs == 0 {
+		maxAbs = 1
+	}
+	p := palette()
+	var lines []string
+	for i, r := range rows {
+		if i >= 5 {
+			break
+		}
+		n := int(math.Round((math.Abs(r.Delta) / maxAbs) * float64(barWidth)))
+		if n < 1 {
+			n = 1
+		}
+		if n > barWidth {
+			n = barWidth
+		}
+		bar := strings.Repeat("█", n)
+		style := lipgloss.NewStyle().Foreground(lipgloss.Color(p.Success))
+		sign := "↑"
+		if r.Delta < 0 {
+			style = lipgloss.NewStyle().Foreground(lipgloss.Color(p.Danger))
+			sign = "↓"
+		}
+		lines = append(lines, fmt.Sprintf("%-16s %s %s %.2f", truncateLabel(r.Label, 16), sign, style.Render(bar), r.Delta))
+	}
+	return strings.Join(lines, "\n")
+}
+
+type LeaderboardRow struct {
+	Label string
+	Delta float64
+}
+
+func dbRollingAverage(series []float64, window int) []float64 {
+	if window <= 1 || len(series) == 0 {
+		return series
+	}
+	out := make([]float64, len(series))
+	sum := 0.0
+	for i := 0; i < len(series); i++ {
+		sum += series[i]
+		if i >= window {
+			sum -= series[i-window]
+		}
+		denom := i + 1
+		if denom > window {
+			denom = window
+		}
+		out[i] = sum / float64(denom)
+	}
+	return out
+}
+
+func truncateLabel(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	if max <= 1 {
+		return s[:1]
+	}
+	return s[:max-1] + "…"
 }
 
 // TrendDeltaStrip renders a compact delta summary for recent vs previous windows.

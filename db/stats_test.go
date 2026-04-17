@@ -263,3 +263,54 @@ func TestTargetHitRate_WithLimit(t *testing.T) {
 		t.Fatalf("pct = %.3f, want approx 33.333", pct)
 	}
 }
+
+func TestRollingAverageSeries_Basic(t *testing.T) {
+	got := RollingAverageSeries([]float64{2, 4, 6, 8}, 2)
+	want := []float64{2, 3, 5, 7}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("idx %d = %.2f, want %.2f", i, got[i], want[i])
+		}
+	}
+}
+
+func TestPersonalBest_Basic(t *testing.T) {
+	entries := []models.Entry{
+		makeEntry("2026-01-03", map[string]interface{}{"weight": float64(178)}),
+		makeEntry("2026-01-02", map[string]interface{}{"weight": float64(180)}),
+		makeEntry("2026-01-01", map[string]interface{}{"weight": float64(175)}),
+	}
+	best, date, ok := PersonalBest(entries, "weight")
+	if !ok {
+		t.Fatal("ok=false, want true")
+	}
+	if best != 180 || date != "2026-01-02" {
+		t.Fatalf("best/date = %.1f/%s, want 180/2026-01-02", best, date)
+	}
+}
+
+func TestMomentumAccelerationRanking_SortedByDelta(t *testing.T) {
+	entries := []models.Entry{
+		makeEntry("2026-01-08", map[string]interface{}{"a": float64(8), "b": float64(4)}),
+		makeEntry("2026-01-07", map[string]interface{}{"a": float64(7), "b": float64(4)}),
+		makeEntry("2026-01-06", map[string]interface{}{"a": float64(6), "b": float64(3)}),
+		makeEntry("2026-01-05", map[string]interface{}{"a": float64(5), "b": float64(3)}),
+		makeEntry("2026-01-04", map[string]interface{}{"a": float64(4), "b": float64(2)}),
+		makeEntry("2026-01-03", map[string]interface{}{"a": float64(3), "b": float64(2)}),
+		makeEntry("2026-01-02", map[string]interface{}{"a": float64(2), "b": float64(1)}),
+		makeEntry("2026-01-01", map[string]interface{}{"a": float64(1), "b": float64(1)}),
+	}
+	rows := MomentumAccelerationRanking(entries, []string{"b", "a"}, 2)
+	if len(rows) != 2 {
+		t.Fatalf("len = %d, want 2", len(rows))
+	}
+	if rows[0].TrackerID != "a" {
+		t.Fatalf("first tracker = %s, want a", rows[0].TrackerID)
+	}
+	if rows[0].Delta < rows[1].Delta {
+		t.Fatalf("rows not sorted desc: %.2f < %.2f", rows[0].Delta, rows[1].Delta)
+	}
+}

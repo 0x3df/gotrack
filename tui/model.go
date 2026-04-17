@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -47,6 +46,9 @@ type Model struct {
 	entries   []models.Entry
 	settings  *settingsWiz
 	stars     []fallingStar
+	twinkles  []twinkleStar
+	bursts    []burstParticle
+	pulseTick int
 	rng       *rand.Rand
 
 	// Entry date picker
@@ -134,6 +136,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state == stateDashboard && m.config != nil && m.config.App.Background.StarfieldEnabled {
 			m.stars = stepStars(m.stars, m.width, m.height)
 			m.stars = maybeSpawnStar(m.stars, m.width, m.height, m.rng)
+			m.twinkles = stepTwinkles(m.twinkles, m.width, m.height, m.rng)
+			m.bursts = stepBurstParticles(m.bursts, m.width, m.height)
+			if m.pulseTick > 0 {
+				m.pulseTick--
+			}
 			return m, starfieldTick()
 		}
 	case setupDoneMsg:
@@ -386,6 +393,7 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.saveEntry()
 		m.state = stateDashboard
 		m.entries, _ = db.GetAllEntries()
+		m.triggerDashboardCelebration()
 		m.syncViewport()
 		if m.config != nil && m.config.App.Background.StarfieldEnabled {
 			return m, starfieldTick()
@@ -459,7 +467,7 @@ func (m Model) View() string {
 		view := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Top,
 			m.dashboardView())
 		if m.config != nil && m.config.App.Background.StarfieldEnabled {
-			view = applyStarfieldOverlay(view, renderStarfieldCanvas(m.width, m.height, m.stars), true)
+			view = applyStarfieldOverlay(view, renderStarfieldCanvas(m.width, m.height, m.stars, m.twinkles, m.bursts), true)
 		}
 		// Ensure it doesn't overflow the terminal height, which causes clipping at the top
 		return lipgloss.NewStyle().MaxHeight(m.height).MaxWidth(m.width).Render(view)
@@ -528,10 +536,15 @@ func (m Model) viewOverview() string {
 	}
 
 	var cards []string
+	accent := p.Primary
+	if m.pulseTick > 0 && m.pulseTick%2 == 0 {
+		accent = p.ChartSecondary
+	}
 
 	cards = append(cards,
-		renderCard("Daily Snapshot", p.Primary, m.overviewSnapshot(), layout.CardWidth, layout.CardHeight),
-		renderCard("Momentum", p.Primary, m.overviewMomentum(), layout.CardWidth, layout.CardHeight),
+		renderCard("Daily Snapshot", accent, m.overviewSnapshot(), layout.CardWidth, layout.CardHeight),
+		renderCard("Momentum", accent, m.overviewMomentum(), layout.CardWidth, layout.CardHeight),
+		renderCard("Personal Best", accent, m.overviewPersonalBest(), layout.CardWidth, layout.CardHeight),
 	)
 
 	for _, cat := range m.config.Categories {
@@ -759,45 +772,44 @@ func (m Model) overviewSnapshot() string {
 }
 
 func (m Model) overviewMomentum() string {
-	type row struct {
-		name   string
-		recent float64
-		prev   float64
-		delta  float64
-	}
-	var deltas []row
-
-	for _, cat := range m.config.Categories {
-		for _, t := range cat.Trackers {
-			switch t.Type {
-			case models.TrackerDuration, models.TrackerCount, models.TrackerNumeric:
-				recent, prev, delta, ok := db.TrackerMomentum(m.entries, t.ID, 7)
-				if !ok {
-					continue
-				}
-				deltas = append(deltas, row{
-					name:   t.Name,
-					recent: recent,
-					prev:   prev,
-					delta:  delta,
-				})
+	trackerLabel := map[string]string{}
+	var trackerIDs []string
+	for _, c := range m.config.Categories {
+		for _, t := range c.Trackers {
+			if t.Type == models.TrackerDuration || t.Type == models.TrackerCount || t.Type == models.TrackerNumeric {
+				trackerIDs = append(trackerIDs, t.ID)
+				trackerLabel[t.ID] = t.Name
 			}
 		}
 	}
-	if len(deltas) == 0 {
+	rows := db.MomentumAccelerationRanking(m.entries, trackerIDs, 7)
+	if len(rows) == 0 {
 		return "Need at least 14 entries on numeric trackers."
 	}
-	sort.Slice(deltas, func(i, j int) bool {
-		return deltas[i].delta > deltas[j].delta
-	})
 	var lines []string
-	for i, d := range deltas {
+	for i, d := range rows {
 		if i >= 3 {
 			break
 		}
-		lines = append(lines, fmt.Sprintf("%s\n%s", truncate(d.name, 20), TrendDeltaStrip(d.recent, d.prev)))
+		lines = append(lines, fmt.Sprintf("%s\n%s", truncate(trackerLabel[d.TrackerID], 20), TrendDeltaStrip(d.RecentAvg, d.PrevAvg)))
 	}
 	return strings.Join(lines, "\n\n")
+}
+
+func (m Model) overviewPersonalBest() string {
+	for _, c := range m.config.Categories {
+		for _, t := range c.Trackers {
+			if t.Type != models.TrackerDuration && t.Type != models.TrackerCount && t.Type != models.TrackerNumeric {
+				continue
+			}
+			best, date, ok := db.PersonalBest(m.entries, t.ID)
+			if !ok {
+				continue
+			}
+			return fmt.Sprintf("%s\nBest: %s\nDate: %s", truncate(t.Name, 18), formatValueWithUnit(best, t), date)
+		}
+	}
+	return "No numeric personal bests yet."
 }
 
 func (m Model) categoryTargetHitRate(cat models.Category, window int) string {
@@ -873,30 +885,51 @@ func (m Model) insightBestWeekday() string {
 }
 
 func (m Model) insightMomentumLeaders() string {
-	type momentum struct {
-		name  string
-		delta float64
-	}
-	var rows []momentum
+	trackerLabel := map[string]string{}
+	var trackerIDs []string
 	for _, cat := range m.config.Categories {
 		for _, t := range cat.Trackers {
-			switch t.Type {
-			case models.TrackerDuration, models.TrackerCount, models.TrackerNumeric:
-				_, _, delta, ok := db.TrackerMomentum(m.entries, t.ID, 7)
-				if !ok {
-					continue
-				}
-				rows = append(rows, momentum{name: t.Name, delta: delta})
+			if t.Type == models.TrackerDuration || t.Type == models.TrackerCount || t.Type == models.TrackerNumeric {
+				trackerIDs = append(trackerIDs, t.ID)
+				trackerLabel[t.ID] = t.Name
 			}
 		}
 	}
-	if len(rows) == 0 {
+	accel := db.MomentumAccelerationRanking(m.entries, trackerIDs, 7)
+	if len(accel) == 0 {
 		return "No momentum data yet."
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].delta > rows[j].delta })
-	best := rows[0]
-	worst := rows[len(rows)-1]
-	return fmt.Sprintf("Leader: %s (%.1f)\nLagger: %s (%.1f)", truncate(best.name, 20), best.delta, truncate(worst.name, 20), worst.delta)
+	var rows []LeaderboardRow
+	for _, a := range accel {
+		rows = append(rows, LeaderboardRow{
+			Label: trackerLabel[a.TrackerID],
+			Delta: a.Delta,
+		})
+	}
+	return LeaderboardBars(rows, 10)
+}
+
+func (m *Model) triggerDashboardCelebration() {
+	if len(m.entries) == 0 || m.width <= 0 || m.height <= 0 || m.config == nil {
+		return
+	}
+	latest := m.entries[0]
+	for _, c := range m.config.Categories {
+		for _, t := range c.Trackers {
+			if t.Target == nil {
+				continue
+			}
+			v, ok := latest.Data[t.ID].(float64)
+			if !ok || v < *t.Target {
+				continue
+			}
+			m.pulseTick = 8
+			if m.rng != nil {
+				m.bursts = append(m.bursts, spawnBurstParticles(m.width, m.height, m.width/2, m.height/3, m.rng)...)
+			}
+			return
+		}
+	}
 }
 
 // ─── Insights Tab ─────────────────────────────────────────────────────────────

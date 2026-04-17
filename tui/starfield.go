@@ -33,6 +33,21 @@ type fallingStar struct {
 	SpawnEdge SpawnEdge
 }
 
+type twinkleStar struct {
+	X     int
+	Y     int
+	Phase int
+}
+
+type burstParticle struct {
+	X      int
+	Y      int
+	VX     int
+	VY     int
+	Life   int
+	Bright bool
+}
+
 func starfieldTick() tea.Cmd {
 	return tea.Tick(125*time.Millisecond, func(t time.Time) tea.Msg {
 		return starfieldTickMsg(t)
@@ -116,7 +131,74 @@ func trailGlyphForVector(vx, vy int) string {
 	return "/"
 }
 
-func renderStarfieldCanvas(width, height int, stars []fallingStar) string {
+func stepTwinkles(twinkles []twinkleStar, width, height int, rng *rand.Rand) []twinkleStar {
+	if width <= 0 || height <= 0 {
+		return nil
+	}
+	if rng == nil {
+		return twinkles
+	}
+	next := twinkles[:0]
+	for _, t := range twinkles {
+		if t.X < 0 || t.X >= width || t.Y < 0 || t.Y >= height {
+			continue
+		}
+		t.Phase = (t.Phase + 1) % 12
+		next = append(next, t)
+	}
+	// Keep ambient twinkles sparse.
+	target := maxInt(6, (width*height)/550)
+	for len(next) < target {
+		next = append(next, twinkleStar{
+			X:     rng.Intn(width),
+			Y:     rng.Intn(height),
+			Phase: rng.Intn(12),
+		})
+	}
+	return next
+}
+
+func spawnBurstParticles(width, height, cx, cy int, rng *rand.Rand) []burstParticle {
+	if rng == nil || width <= 0 || height <= 0 {
+		return nil
+	}
+	if cx < 0 || cx >= width {
+		cx = width / 2
+	}
+	if cy < 0 || cy >= height {
+		cy = height / 3
+	}
+	particles := make([]burstParticle, 0, 10)
+	dirs := [][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {-1, -1}, {1, -1}, {-1, 1}}
+	for i := 0; i < len(dirs); i++ {
+		v := dirs[i]
+		particles = append(particles, burstParticle{
+			X:      cx,
+			Y:      cy,
+			VX:     v[0],
+			VY:     v[1],
+			Life:   3 + rng.Intn(2),
+			Bright: i%2 == 0,
+		})
+	}
+	return particles
+}
+
+func stepBurstParticles(parts []burstParticle, width, height int) []burstParticle {
+	var next []burstParticle
+	for _, p := range parts {
+		p.X += p.VX
+		p.Y += p.VY
+		p.Life--
+		if p.Life <= 0 || p.X < 0 || p.X >= width || p.Y < 0 || p.Y >= height {
+			continue
+		}
+		next = append(next, p)
+	}
+	return next
+}
+
+func renderStarfieldCanvas(width, height int, stars []fallingStar, twinkles []twinkleStar, bursts []burstParticle) string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
@@ -133,6 +215,21 @@ func renderStarfieldCanvas(width, height int, stars []fallingStar) string {
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color(p.StarDim))
 	bright := lipgloss.NewStyle().Foreground(lipgloss.Color(p.StarBright)).Bold(true)
 	trailStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(p.StarTrail))
+	burstStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(p.ChartSecondary)).Bold(true)
+
+	for _, t := range twinkles {
+		if t.X < 0 || t.X >= width || t.Y < 0 || t.Y >= height {
+			continue
+		}
+		g := "."
+		switch {
+		case t.Phase%6 == 0:
+			g = "*"
+		case t.Phase%3 == 0:
+			g = "+"
+		}
+		grid[t.Y][t.X] = dim.Render(g)
+	}
 
 	for _, star := range stars {
 		if star.X >= 0 && star.X < width && star.Y >= 0 && star.Y < height {
@@ -156,6 +253,17 @@ func renderStarfieldCanvas(width, height int, stars []fallingStar) string {
 			}
 			grid[ty][tx] = trailStyle.Render(glyph)
 		}
+	}
+
+	for _, b := range bursts {
+		if b.X < 0 || b.X >= width || b.Y < 0 || b.Y >= height {
+			continue
+		}
+		g := "."
+		if b.Bright {
+			g = "*"
+		}
+		grid[b.Y][b.X] = burstStyle.Render(g)
 	}
 
 	lines := make([]string, height)

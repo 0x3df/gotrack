@@ -1,6 +1,7 @@
 package db
 
 import (
+	"sort"
 	"time"
 
 	"dailytrack/models"
@@ -172,4 +173,85 @@ func averageFloatSlice(values []float64) float64 {
 		sum += v
 	}
 	return sum / float64(len(values))
+}
+
+// RollingAverageSeries returns a trailing-window moving average for each point
+// in the oldest-first series. It returns nil if window <= 0.
+func RollingAverageSeries(series []float64, window int) []float64 {
+	if window <= 0 {
+		return nil
+	}
+	if len(series) == 0 {
+		return []float64{}
+	}
+	out := make([]float64, len(series))
+	sum := 0.0
+	for i := 0; i < len(series); i++ {
+		sum += series[i]
+		if i >= window {
+			sum -= series[i-window]
+		}
+		denom := i + 1
+		if denom > window {
+			denom = window
+		}
+		out[i] = sum / float64(denom)
+	}
+	return out
+}
+
+// PersonalBest finds the highest numeric value and its date.
+func PersonalBest(entries []models.Entry, trackerID string) (best float64, date string, ok bool) {
+	best = 0
+	date = ""
+	ok = false
+	for i := len(entries) - 1; i >= 0; i-- { // oldest -> newest for deterministic date tie-break
+		v, found := entries[i].Data[trackerID]
+		if !found {
+			continue
+		}
+		var val float64
+		switch t := v.(type) {
+		case float64:
+			val = t
+		case int:
+			val = float64(t)
+		default:
+			continue
+		}
+		if !ok || val > best {
+			best = val
+			date = entries[i].Date
+			ok = true
+		}
+	}
+	return best, date, ok
+}
+
+type MomentumAcceleration struct {
+	TrackerID string
+	RecentAvg float64
+	PrevAvg   float64
+	Delta     float64
+}
+
+// MomentumAccelerationRanking computes momentum deltas and sorts descending.
+func MomentumAccelerationRanking(entries []models.Entry, trackerIDs []string, window int) []MomentumAcceleration {
+	var rows []MomentumAcceleration
+	for _, trackerID := range trackerIDs {
+		recent, prev, delta, ok := TrackerMomentum(entries, trackerID, window)
+		if !ok {
+			continue
+		}
+		rows = append(rows, MomentumAcceleration{
+			TrackerID: trackerID,
+			RecentAvg: recent,
+			PrevAvg:   prev,
+			Delta:     delta,
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].Delta > rows[j].Delta
+	})
+	return rows
 }
