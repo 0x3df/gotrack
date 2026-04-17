@@ -268,14 +268,17 @@ func ScatterPlot(xVals []float64, yVals []float64, xLabel, yLabel string) string
 }
 
 // renderLineChart renders a line chart for duration/numeric/count trackers.
-func renderLineChart(series []float64, t models.Tracker) string {
+func renderLineChart(series []float64, t models.Tracker, cardWidth int) string {
+	chartWidth := dashboardChartWidth(cardWidth)
+	progressWidth := dashboardProgressWidth(cardWidth)
+
 	if len(series) < 2 {
 		if len(series) == 1 {
 			res := fmt.Sprintf("Latest: %s", formatValueWithUnit(series[0], t))
 			if t.Target != nil {
 				pct := (series[0] / *t.Target) * 100
 				res += fmt.Sprintf("\nTarget: %s\nGoal Completion:\n%s",
-					formatValueWithUnit(*t.Target, t), ProgressBar(pct, 28))
+					formatValueWithUnit(*t.Target, t), ProgressBar(pct, progressWidth))
 			}
 			return res
 		}
@@ -287,7 +290,7 @@ func renderLineChart(series []float64, t models.Tracker) string {
 	if unit != "" {
 		label = fmt.Sprintf("Last %d entries (%s)", len(series), unit)
 	}
-	chart := asciigraph.Plot(series, asciigraph.Height(4), asciigraph.Width(28))
+	chart := asciigraph.Plot(series, asciigraph.Height(4), asciigraph.Width(chartWidth))
 
 	extra := ""
 	if t.Target != nil {
@@ -300,7 +303,7 @@ func renderLineChart(series []float64, t models.Tracker) string {
 			}
 		}
 		extra = fmt.Sprintf("\nLatest Goal: %s\nTarget %s: hit %d/%d days",
-			ProgressBar(pct, 28), formatValueWithUnit(*t.Target, t), hitCount, len(series))
+			ProgressBar(pct, progressWidth), formatValueWithUnit(*t.Target, t), hitCount, len(series))
 	}
 
 	return label + "\n" + chart + extra

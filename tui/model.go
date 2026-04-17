@@ -124,8 +124,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.help.Width = msg.Width
-		m.vp.Width = msg.Width
+		layout := dashboardLayoutForWidth(msg.Width)
+		m.help.Width = layout.ContentWidth
+		m.vp.Width = layout.ContentWidth
 		m.vp.Height = msg.Height - 13 // 13 is approx header + footer height
 		m.syncViewport()
 	case starfieldTickMsg:
@@ -183,6 +184,7 @@ func (m *Model) syncViewport() {
 	if m.width == 0 || m.config == nil {
 		return
 	}
+	layout := dashboardLayoutForWidth(m.width)
 	var content string
 	if m.activeTab == 0 {
 		content = m.viewOverview()
@@ -193,7 +195,8 @@ func (m *Model) syncViewport() {
 		content = m.viewCategory(cat)
 	}
 
-	m.vp.SetContent(lipgloss.NewStyle().Align(lipgloss.Center).Width(m.width).Render(content))
+	m.vp.Width = layout.ContentWidth
+	m.vp.SetContent(lipgloss.NewStyle().Width(layout.ContentWidth).Render(content))
 }
 
 func (m Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -463,10 +466,11 @@ const banner = `______     ______     ______   ______     ______     ______     
   \/_____/   \/_____/     \/_/   \/_/ /_/   \/_/\/_/   \/_____/   \/_/\/_/`
 
 func (m Model) dashboardView() string {
+	layout := dashboardLayoutForWidth(m.width)
 	p := palette()
 	titleStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(p.Primary)).Bold(true).
-		Align(lipgloss.Center).Width(m.width).MarginBottom(1).MarginTop(1)
+		Align(lipgloss.Center).Width(layout.ContentWidth).MarginBottom(1).MarginTop(1)
 
 	tabNames := []string{"Overview"}
 	for _, c := range m.config.Categories {
@@ -485,42 +489,29 @@ func (m Model) dashboardView() string {
 		}
 		tabParts = append(tabParts, style.Render(name))
 	}
-	tabBar := lipgloss.NewStyle().MarginBottom(1).Align(lipgloss.Center).Width(m.width).
+	tabBar := lipgloss.NewStyle().MarginBottom(1).Align(lipgloss.Center).Width(layout.ContentWidth).
 		Render(lipgloss.JoinHorizontal(lipgloss.Top, tabParts...))
 
-	helpView := lipgloss.NewStyle().MarginTop(1).Align(lipgloss.Center).Width(m.width).
+	helpView := lipgloss.NewStyle().MarginTop(1).Align(lipgloss.Center).Width(layout.ContentWidth).
 		Render(m.help.View(keys))
 
-	return lipgloss.JoinVertical(lipgloss.Center,
+	content := lipgloss.JoinVertical(lipgloss.Center,
 		titleStyle.Render(banner),
 		tabBar,
 		m.vp.View(),
 		helpView,
 	)
-}
 
-func box(title, content string, width, height int) string {
-	p := palette()
-	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(p.Border)).
-		Padding(1, 2).
-		Width(width)
-
-	if height > 0 {
-		style = style.Height(height)
-	}
-
-	return style.Render(lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.NewStyle().Foreground(lipgloss.Color(p.Primary)).Bold(true).Render(title),
-		"",
-		content,
-	))
+	return lipgloss.NewStyle().
+		Width(m.width).
+		Align(lipgloss.Center).
+		Render(content)
 }
 
 // ─── Overview Tab ─────────────────────────────────────────────────────────────
 
 func (m Model) viewOverview() string {
+	layout := dashboardLayoutForWidth(m.width)
 	p := palette()
 	if len(m.entries) == 0 {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color(p.Muted)).
@@ -528,8 +519,6 @@ func (m Model) viewOverview() string {
 	}
 
 	var cards []string
-	const boxWidth = 40
-	const boxHeight = 8
 
 	for _, cat := range m.config.Categories {
 		content := m.categorySummary(cat)
@@ -537,31 +526,14 @@ func (m Model) viewOverview() string {
 		if color == "" {
 			color = p.Primary
 		}
-		titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Bold(true)
-		rendered := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color(p.Border)).
-			Padding(1, 2).
-			Width(boxWidth).
-			Height(boxHeight).
-			Render(lipgloss.JoinVertical(lipgloss.Left,
-				titleStyle.Render(cat.Name), "", content))
-		cards = append(cards, rendered)
+		cards = append(cards, renderCard(cat.Name, color, content, layout.CardWidth, layout.CardHeight))
 	}
 
 	if len(cards) == 0 {
 		return "No categories configured."
 	}
 
-	var rows []string
-	for i := 0; i < len(cards); i += 2 {
-		end := i + 2
-		if end > len(cards) {
-			end = len(cards)
-		}
-		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, cards[i:end]...))
-	}
-	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+	return renderCardGrid(cards, m.width)
 }
 
 func (m Model) categorySummary(cat models.Category) string {
@@ -633,6 +605,7 @@ func (m Model) categorySummary(cat models.Category) string {
 // ─── Category Tab ─────────────────────────────────────────────────────────────
 
 func (m Model) viewCategory(cat models.Category) string {
+	layout := dashboardLayoutForWidth(m.width)
 	if len(m.entries) == 0 {
 		return "No entries yet."
 	}
@@ -661,15 +634,15 @@ func (m Model) viewCategory(cat models.Category) string {
 			}
 			content := fmt.Sprintf("Streak: %d days  |  All-time: %.0f%%\n\n", streak, pct) +
 				Heatmap(heat, offset)
-			boxes = append(boxes, box(t.Name, content, 42, 14))
+			boxes = append(boxes, renderCard(t.Name, palette().Primary, content, layout.CardWidth, layout.CardHeight))
 
 		case models.TrackerDuration, models.TrackerNumeric, models.TrackerCount:
 			series := db.NumericSeries(m.entries, t.ID)
 			if len(series) > limit {
 				series = series[len(series)-limit:]
 			}
-			content := renderLineChart(series, t)
-			boxes = append(boxes, box(t.Name, content, 42, 14))
+			content := renderLineChart(series, t, layout.CardWidth)
+			boxes = append(boxes, renderCard(t.Name, palette().Primary, content, layout.CardWidth, layout.CardHeight))
 
 		case models.TrackerRating:
 			series := db.NumericSeries(m.entries, t.ID)
@@ -680,7 +653,7 @@ func (m Model) viewCategory(cat models.Category) string {
 			if len(series) > 0 {
 				content += fmt.Sprintf("\n\nAvg: %.1f / 5", average(series))
 			}
-			boxes = append(boxes, box(t.Name, content, 42, 14))
+			boxes = append(boxes, renderCard(t.Name, palette().Primary, content, layout.CardWidth, layout.CardHeight))
 
 		case models.TrackerText:
 			var logs []string
@@ -698,7 +671,7 @@ func (m Model) viewCategory(cat models.Category) string {
 			if content == "" {
 				content = "(no entries yet)"
 			}
-			boxes = append(boxes, box(t.Name, content, 42, 14))
+			boxes = append(boxes, renderCard(t.Name, palette().Primary, content, layout.CardWidth, layout.CardHeight))
 		}
 	}
 
@@ -706,15 +679,7 @@ func (m Model) viewCategory(cat models.Category) string {
 		return "No trackers in this category."
 	}
 
-	var rows []string
-	for i := 0; i < len(boxes); i += 2 {
-		end := i + 2
-		if end > len(boxes) {
-			end = len(boxes)
-		}
-		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, boxes[i:end]...))
-	}
-	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+	return renderCardGrid(boxes, m.width)
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -740,6 +705,7 @@ func truncate(s string, max int) string {
 // ─── Insights Tab ─────────────────────────────────────────────────────────────
 
 func (m Model) viewInsights() string {
+	layout := dashboardLayoutForWidth(m.width)
 	if len(m.entries) == 0 {
 		return "No data recorded yet."
 	}
@@ -808,10 +774,10 @@ func (m Model) viewInsights() string {
 		return "Please add a Rating Tracker to view insights."
 	}
 
-	return lipgloss.JoinHorizontal(lipgloss.Top,
-		box("A/B Impact", compStr, 45, 14),
-		box("Scatter Analysis", scatterStr, 45, 14),
-	)
+	return renderCardGrid([]string{
+		renderCard("A/B Impact", palette().Primary, compStr, layout.CardWidth, layout.CardHeight),
+		renderCard("Scatter Analysis", palette().Primary, scatterStr, layout.CardWidth, layout.CardHeight),
+	}, m.width)
 }
 
 func averageInts(nums []int) float64 {
