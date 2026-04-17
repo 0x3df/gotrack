@@ -9,8 +9,8 @@ import (
 	"dailytrack/db"
 	"dailytrack/models"
 
-	"github.com/charmbracelet/huh"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/huh"
 )
 
 // setupDoneMsg is sent when the setup wizard completes.
@@ -18,15 +18,18 @@ type setupDoneMsg struct {
 	cfg *models.Config
 }
 
+type setupCanceledMsg struct{}
+
 type setupPhase int
 
 const (
-	phaseWelcome      setupPhase = iota
-	phaseDefaultAreas            // which broad areas to track
-	phaseDefaultLangs            // which languages (if Languages selected)
-	phaseDefaultPick             // toggle specific trackers per area
-	phaseCustomInput             // custom: enter category names
-	phaseTargets                 // ask for goals/targets
+	phaseWelcome        setupPhase = iota
+	phaseDefaultAreas              // which broad areas to track
+	phaseDefaultLangs              // which languages (if Languages selected)
+	phaseDefaultPick               // toggle specific trackers per area
+	phaseCustomInput               // custom: enter category names
+	phaseCustomTrackers            // custom: build trackers for each category
+	phaseTargets                   // ask for goals/targets
 	phaseDone
 )
 
@@ -44,16 +47,32 @@ type setupWiz struct {
 	healthPicks  []string
 	carePicks    []string
 	customCatRaw string // newline-separated category names
+	targetUnits  map[string]*string
 	targets      map[string]*string
 
 	// internal state
-	tempConfig *models.Config
+	tempConfig          *models.Config
+	customCatIdx        int
+	customTrackerName   string
+	customTrackerType   models.TrackerType
+	customTrackerUnit   string
+	customTrackerTarget string
+	customAddAnother    bool
+	notice              string
+	abortMsg            tea.Msg
 }
 
 func newSetupWiz() *setupWiz {
+	return newAbortableSetupWiz(nil)
+}
+
+func newAbortableSetupWiz(abortMsg tea.Msg) *setupWiz {
 	w := &setupWiz{
-		workspace: "~/.dailytrack",
-		targets:   make(map[string]*string),
+		workspace:         "~/.dailytrack",
+		targetUnits:       make(map[string]*string),
+		targets:           make(map[string]*string),
+		customTrackerType: models.TrackerBinary,
+		abortMsg:          abortMsg,
 	}
 	w.buildForm()
 	return w
@@ -153,22 +172,106 @@ func (w *setupWiz) buildForm() {
 			huh.NewText().
 				Title("Define your categories").
 				Description("Enter one category name per line.\nYou can add trackers after setup.").
-				Value(&w.customCatRaw),
+				Value(&w.customCatRaw).
+				Validate(func(s string) error {
+					for _, line := range strings.Split(s, "\n") {
+						if strings.TrimSpace(line) != "" {
+							return nil
+						}
+					}
+					return fmt.Errorf("enter at least one category")
+				}),
+		))
+
+	case phaseCustomTrackers:
+		if w.tempConfig == nil || len(w.tempConfig.Categories) == 0 || w.customCatIdx >= len(w.tempConfig.Categories) {
+			w.phase = phaseDone
+			return
+		}
+		cat := w.tempConfig.Categories[w.customCatIdx]
+		if !w.customTrackerType.IsValid() {
+			w.customTrackerType = models.TrackerBinary
+		}
+		w.form = huh.NewForm(huh.NewGroup(
+			huh.NewInput().
+				Title(fmt.Sprintf("Tracker name (%s)", cat.Name)).
+				Description("Add one tracker at a time. Each category needs at least one tracker.").
+				Value(&w.customTrackerName).
+				Validate(func(s string) error {
+					if strings.TrimSpace(s) == "" {
+						return fmt.Errorf("enter a tracker name")
+					}
+					return nil
+				}),
+			huh.NewSelect[models.TrackerType]().
+				Title("Tracker type").
+				Options(
+					huh.NewOption("Binary", models.TrackerBinary),
+					huh.NewOption("Duration", models.TrackerDuration),
+					huh.NewOption("Count", models.TrackerCount),
+					huh.NewOption("Numeric", models.TrackerNumeric),
+					huh.NewOption("Rating", models.TrackerRating),
+					huh.NewOption("Text", models.TrackerText),
+				).
+				Value(&w.customTrackerType),
+			huh.NewInput().
+				Title("Unit").
+				Description("Required for duration, count, and numeric trackers. Leave blank otherwise.").
+				Value(&w.customTrackerUnit).
+				Validate(func(s string) error {
+					if trackerNeedsUnit(w.customTrackerType) && strings.TrimSpace(s) == "" {
+						return fmt.Errorf("enter a unit")
+					}
+					return nil
+				}),
+			huh.NewInput().
+				Title("Target (optional)").
+				Description("Enter a numeric target or leave blank for none.").
+				Value(&w.customTrackerTarget).
+				Validate(func(s string) error {
+					if strings.TrimSpace(s) == "" {
+						return nil
+					}
+					if _, err := strconv.ParseFloat(s, 64); err != nil {
+						return fmt.Errorf("must be a number")
+					}
+					return nil
+				}),
+			huh.NewConfirm().
+				Title(fmt.Sprintf("Add another tracker to %s?", cat.Name)).
+				Value(&w.customAddAnother),
 		))
 
 	case phaseTargets:
+		w.targetUnits = make(map[string]*string)
+		w.targets = make(map[string]*string)
 		var fields []huh.Field
 		for _, cat := range w.tempConfig.Categories {
 			for _, t := range cat.Trackers {
 				if t.Type == models.TrackerDuration || t.Type == models.TrackerCount || t.Type == models.TrackerNumeric {
-					s := ""
-					w.targets[t.ID] = &s
+					unit := t.Unit
+					target := ""
+					if t.Target != nil {
+						target = strconv.FormatFloat(*t.Target, 'f', -1, 64)
+					}
+					w.targetUnits[t.ID] = &unit
+					w.targets[t.ID] = &target
+					fields = append(fields, huh.NewInput().
+						Title(fmt.Sprintf("Unit for %s (%s)", t.Name, cat.Name)).
+						Description("Examples: minutes, count, lb, value").
+						Value(&unit).
+						Validate(func(s string) error {
+							if strings.TrimSpace(s) == "" {
+								return fmt.Errorf("enter a unit")
+							}
+							return nil
+						}))
 					fields = append(fields, huh.NewInput().
 						Title(fmt.Sprintf("Target for %s (%s)", t.Name, cat.Name)).
 						Description("Leave blank for no target").
-						Value(&s).
+						Value(&target).
 						Validate(func(s string) error {
-							if s == "" {
+							if strings.TrimSpace(s) == "" {
 								return nil
 							}
 							_, err := strconv.ParseFloat(s, 64)
@@ -225,14 +328,41 @@ func (w *setupWiz) advance() {
 		w.phase = phaseTargets
 	case phaseCustomInput:
 		w.tempConfig = w.buildCustomConfig()
-		w.phase = phaseTargets
+		w.customCatIdx = 0
+		w.resetCustomTrackerDraft()
+		w.phase = phaseCustomTrackers
+	case phaseCustomTrackers:
+		cat := &w.tempConfig.Categories[w.customCatIdx]
+		tr := models.NewTracker(strings.TrimSpace(w.customTrackerName), w.customTrackerType)
+		tr.Order = len(cat.Trackers)
+		applyTrackerDetails(&tr, w.customTrackerUnit, w.customTrackerTarget)
+		cat.Trackers = append(cat.Trackers, tr)
+		if w.customAddAnother {
+			w.resetCustomTrackerDraft()
+			break
+		}
+		w.customCatIdx++
+		if w.customCatIdx >= len(w.tempConfig.Categories) {
+			w.phase = phaseDone
+			break
+		}
+		w.resetCustomTrackerDraft()
 	case phaseTargets:
 		// Apply targets to tempConfig
 		for _, cat := range w.tempConfig.Categories {
 			for i, t := range cat.Trackers {
+				if s, ok := w.targetUnits[t.ID]; ok {
+					unit := strings.TrimSpace(*s)
+					if unit == "" {
+						unit = models.DefaultUnit(t.Name, t.Type)
+					}
+					cat.Trackers[i].Unit = unit
+				}
 				if s, ok := w.targets[t.ID]; ok && *s != "" {
 					val, _ := strconv.ParseFloat(*s, 64)
 					cat.Trackers[i].Target = &val
+				} else {
+					cat.Trackers[i].Target = nil
 				}
 			}
 		}
@@ -411,6 +541,9 @@ func (w *setupWiz) Update(msg tea.Msg) tea.Cmd {
 		}
 	}
 	if w.form.State == huh.StateAborted {
+		if w.abortMsg != nil {
+			return func() tea.Msg { return w.abortMsg }
+		}
 		return tea.Quit
 	}
 	return cmd
@@ -420,5 +553,41 @@ func (w *setupWiz) View() string {
 	if w.form == nil {
 		return "Setting up..."
 	}
-	return w.form.View()
+	if strings.TrimSpace(w.notice) == "" {
+		return w.form.View()
+	}
+	return w.notice + "\n\n" + w.form.View()
+}
+
+func (w *setupWiz) resetCustomTrackerDraft() {
+	w.customTrackerName = ""
+	w.customTrackerType = models.TrackerBinary
+	w.customTrackerUnit = ""
+	w.customTrackerTarget = ""
+	w.customAddAnother = false
+}
+
+func trackerNeedsUnit(t models.TrackerType) bool {
+	return t == models.TrackerDuration || t == models.TrackerCount || t == models.TrackerNumeric
+}
+
+func applyTrackerDetails(tr *models.Tracker, unitInput, targetInput string) {
+	unit := strings.TrimSpace(unitInput)
+	if trackerNeedsUnit(tr.Type) {
+		if unit == "" {
+			unit = models.DefaultUnit(tr.Name, tr.Type)
+		}
+		tr.Unit = unit
+	} else {
+		tr.Unit = ""
+	}
+
+	targetInput = strings.TrimSpace(targetInput)
+	if targetInput == "" {
+		tr.Target = nil
+		return
+	}
+	if val, err := strconv.ParseFloat(targetInput, 64); err == nil {
+		tr.Target = &val
+	}
 }

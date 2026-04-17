@@ -23,15 +23,17 @@ type appState int
 const (
 	stateSetup     appState = iota // first-launch wizard
 	stateDashboard                 // main tabs
+	stateEntryDate                 // pick date before entry form
 	stateForm                      // daily entry
+	stateSettings                  // settings/config editor
 )
 
 type Model struct {
-	state   appState
-	width   int
-	height  int
-	help    help.Model
-	vp      viewport.Model
+	state  appState
+	width  int
+	height int
+	help   help.Model
+	vp     viewport.Model
 
 	// Setup
 	setup *setupWiz
@@ -40,6 +42,11 @@ type Model struct {
 	activeTab int
 	config    *models.Config
 	entries   []models.Entry
+	settings  *settingsWiz
+
+	// Entry date picker
+	dateForm  *huh.Form
+	entryDate string
 
 	// Entry form
 	form     *huh.Form
@@ -50,29 +57,31 @@ type Model struct {
 }
 
 type keyMap struct {
-	Add   key.Binding
-	Quit  key.Binding
-	Left  key.Binding
-	Right key.Binding
-	Up    key.Binding
-	Down  key.Binding
+	Add      key.Binding
+	Settings key.Binding
+	Quit     key.Binding
+	Left     key.Binding
+	Right    key.Binding
+	Up       key.Binding
+	Down     key.Binding
 }
 
 var keys = keyMap{
-	Add:   key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add entry")),
-	Left:  key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "prev tab")),
-	Right: key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "next tab")),
-	Up:    key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "scroll up")),
-	Down:  key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "scroll down")),
-	Quit:  key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
+	Add:      key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add/edit entry")),
+	Settings: key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "settings")),
+	Left:     key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "prev tab")),
+	Right:    key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "next tab")),
+	Up:       key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "scroll up")),
+	Down:     key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "scroll down")),
+	Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Left, k.Right, k.Up, k.Down, k.Add, k.Quit}
+	return []key.Binding{k.Left, k.Right, k.Up, k.Down, k.Add, k.Settings, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Left, k.Right, k.Up, k.Down, k.Add, k.Quit}}
+	return [][]key.Binding{{k.Left, k.Right, k.Up, k.Down, k.Add, k.Settings, k.Quit}}
 }
 
 func InitialModel(cfg *models.Config) Model {
@@ -117,6 +126,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.entries, _ = db.GetAllEntries()
 		m.syncViewport()
 		return m, nil
+	case setupCanceledMsg:
+		m.state = stateDashboard
+		m.syncViewport()
+		return m, nil
+	case settingsDoneMsg:
+		m.state = stateDashboard
+		m.settings = nil
+		m.syncViewport()
+		return m, nil
+	case settingsRerunSetupMsg:
+		m.settings = nil
+		m.state = stateSetup
+		m.setup = newAbortableSetupWiz(setupCanceledMsg{})
+		return m, m.setup.Init()
 	}
 
 	switch m.state {
@@ -125,8 +148,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case stateDashboard:
 		return m.updateDashboard(msg)
+	case stateEntryDate:
+		return m.updateDateForm(msg)
 	case stateForm:
 		return m.updateForm(msg)
+	case stateSettings:
+		cmd := m.settings.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -144,7 +172,7 @@ func (m *Model) syncViewport() {
 		cat := m.config.Categories[m.activeTab-1]
 		content = m.viewCategory(cat)
 	}
-	
+
 	m.vp.SetContent(lipgloss.NewStyle().Align(lipgloss.Center).Width(m.width).Render(content))
 }
 
@@ -156,13 +184,17 @@ func (m Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.Quit):
 			return m, tea.Quit
 		case key.Matches(msg, keys.Add):
-			m.state = stateForm
-			m.initForm()
-			if m.form == nil {
+			m.state = stateEntryDate
+			m.initDateForm()
+			if m.dateForm == nil {
 				m.state = stateDashboard
 				return m, nil
 			}
-			return m, m.form.Init()
+			return m, m.dateForm.Init()
+		case key.Matches(msg, keys.Settings):
+			m.state = stateSettings
+			m.settings = newSettingsWiz(m.config, m.entries)
+			return m, m.settings.Init()
 		case key.Matches(msg, keys.Left):
 			total := len(m.config.Categories) + 2
 			m.activeTab = (m.activeTab - 1 + total) % total
@@ -175,12 +207,50 @@ func (m Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.vp.GotoTop()
 		}
 	}
-	
+
 	m.vp, cmd = m.vp.Update(msg)
 	return m, cmd
 }
 
-func (m *Model) initForm() {
+func (m *Model) initDateForm() {
+	m.entryDate = time.Now().Format("2006-01-02")
+	m.dateForm = huh.NewForm(huh.NewGroup(
+		huh.NewInput().
+			Title("Entry date").
+			Description("Use YYYY-MM-DD. Existing dates load for editing.").
+			Value(&m.entryDate).
+			Validate(validateEntryDate),
+	))
+}
+
+func (m *Model) updateDateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	form, cmd := m.dateForm.Update(msg)
+	if f, ok := form.(*huh.Form); ok {
+		m.dateForm = f
+	}
+	if m.dateForm.State == huh.StateCompleted {
+		entry, err := db.GetEntryForDate(m.entryDate)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dailytrack: failed to load entry: %v\n", err)
+			m.state = stateDashboard
+			return m, nil
+		}
+		m.state = stateForm
+		m.initForm(entry)
+		if m.form == nil {
+			m.state = stateDashboard
+			return m, nil
+		}
+		return m, m.form.Init()
+	}
+	if m.dateForm.State == huh.StateAborted {
+		m.state = stateDashboard
+		return m, nil
+	}
+	return m, cmd
+}
+
+func (m *Model) initForm(entry *models.Entry) {
 	m.boolPtrs = make(map[string]*bool)
 	m.strPtrs = make(map[string]*string)
 	m.intPtrs = make(map[string]*int)
@@ -193,18 +263,14 @@ func (m *Model) initForm() {
 		for _, t := range cat.Trackers {
 			switch t.Type {
 			case models.TrackerBinary:
-				b := false
+				b := prefillBoolValue(entryData(entry), t.ID)
 				m.boolPtrs[t.ID] = &b
 				fields = append(fields, huh.NewConfirm().Title(t.Name).Value(&b))
 
 			case models.TrackerDuration:
-				s := ""
+				s := prefillStringValue(entryData(entry), t.ID)
 				m.strPtrs[t.ID] = &s
-				label := t.Name + " (minutes)"
-				if t.Target != nil {
-					label = fmt.Sprintf("%s (minutes, target: %.0f)", t.Name, *t.Target)
-				}
-				fields = append(fields, huh.NewInput().Title(label).Value(&s).
+				fields = append(fields, huh.NewInput().Title(trackerInputLabel(t)).Value(&s).
 					Validate(func(s string) error {
 						if s == "" {
 							return nil
@@ -217,9 +283,9 @@ func (m *Model) initForm() {
 					}))
 
 			case models.TrackerCount:
-				s := ""
+				s := prefillStringValue(entryData(entry), t.ID)
 				m.strPtrs[t.ID] = &s
-				fields = append(fields, huh.NewInput().Title(t.Name).Value(&s).
+				fields = append(fields, huh.NewInput().Title(trackerInputLabel(t)).Value(&s).
 					Validate(func(s string) error {
 						if s == "" {
 							return nil
@@ -232,9 +298,9 @@ func (m *Model) initForm() {
 					}))
 
 			case models.TrackerNumeric:
-				s := ""
+				s := prefillStringValue(entryData(entry), t.ID)
 				m.strPtrs[t.ID] = &s
-				fields = append(fields, huh.NewInput().Title(t.Name).Value(&s).
+				fields = append(fields, huh.NewInput().Title(trackerInputLabel(t)).Value(&s).
 					Validate(func(s string) error {
 						if s == "" {
 							return nil
@@ -247,7 +313,7 @@ func (m *Model) initForm() {
 					}))
 
 			case models.TrackerRating:
-				v := 3
+				v := prefillIntValue(entryData(entry), t.ID, 3)
 				m.intPtrs[t.ID] = &v
 				fields = append(fields, huh.NewSelect[int]().
 					Title(t.Name).
@@ -261,7 +327,7 @@ func (m *Model) initForm() {
 					Value(&v))
 
 			case models.TrackerText:
-				s := ""
+				s := prefillStringValue(entryData(entry), t.ID)
 				m.strPtrs[t.ID] = &s
 				m.textIDs[t.ID] = true
 				fields = append(fields, huh.NewText().Title(t.Name).Value(&s))
@@ -321,7 +387,7 @@ func (m *Model) saveEntry() {
 	}
 
 	entry := &models.Entry{
-		Date: time.Now().Format("2006-01-02"),
+		Date: m.entryDate,
 		Data: data,
 	}
 	if err := db.UpsertEntry(entry); err != nil {
@@ -337,9 +403,15 @@ func (m Model) View() string {
 	case stateSetup:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			m.setup.View())
+	case stateEntryDate:
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			m.dateForm.View())
 	case stateForm:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			m.form.View())
+	case stateSettings:
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			m.settings.View())
 	default:
 		view := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Top,
 			m.dashboardView())
@@ -415,7 +487,7 @@ func box(title, content string, width, height int) string {
 func (m Model) viewOverview() string {
 	if len(m.entries) == 0 {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).
-			Render("No entries yet. Press 'a' to log today.")
+			Render("No entries yet. Press 'a' to add or edit an entry.")
 	}
 
 	var cards []string
@@ -476,7 +548,7 @@ func (m Model) categorySummary(cat models.Category) string {
 				}
 			}
 			valStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
-			lines = append(lines, fmt.Sprintf("%-22s avg %smin", truncate(t.Name, 22), valStyle.Render(fmt.Sprintf("%.0f", avg))))
+			lines = append(lines, fmt.Sprintf("%-22s avg %s", truncate(t.Name, 22), valStyle.Render(formatValueWithUnit(avg, t))))
 
 		case models.TrackerNumeric, models.TrackerCount:
 			series := db.NumericSeries(m.entries, t.ID)
@@ -491,7 +563,7 @@ func (m Model) categorySummary(cat models.Category) string {
 					}
 				}
 				valStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
-				lines = append(lines, fmt.Sprintf("%-22s %s", truncate(t.Name, 22), valStyle.Render(fmt.Sprintf("%.1f", latest))))
+				lines = append(lines, fmt.Sprintf("%-22s %s", truncate(t.Name, 22), valStyle.Render(formatValueWithUnit(latest, t))))
 			}
 
 		case models.TrackerRating:

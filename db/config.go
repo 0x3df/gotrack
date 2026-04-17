@@ -22,7 +22,9 @@ func GetConfigPath() (string, error) {
 
 func LoadConfig() (*models.Config, error) {
 	path, err := GetConfigPath()
-	if err != nil {
+	if os.IsNotExist(err) {
+		return nil, nil
+	} else if err != nil {
 		return nil, err
 	}
 
@@ -37,6 +39,7 @@ func LoadConfig() (*models.Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
+	models.NormalizeConfig(&cfg)
 	return &cfg, nil
 }
 
@@ -45,6 +48,7 @@ func SaveConfig(cfg *models.Config) error {
 	if err != nil {
 		return err
 	}
+	models.NormalizeConfig(cfg)
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err

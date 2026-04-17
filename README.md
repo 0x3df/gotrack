@@ -43,7 +43,8 @@ On first launch, GoTrack walks you through a setup wizard so you can:
 
 ## Controls
 
-- `a`: add a new daily entry
+- `a`: add or edit an entry for any date
+- `s`: open settings and tracking setup
 - `h` / `l` or `←` / `→`: switch tabs
 - `j` / `k` or `↓` / `↑`: scroll visualizations
 - `q`: quit

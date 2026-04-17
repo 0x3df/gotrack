@@ -1,6 +1,10 @@
 package models
 
-import "github.com/google/uuid"
+import (
+	"strings"
+
+	"github.com/google/uuid"
+)
 
 type TrackerType string
 
@@ -17,6 +21,7 @@ type Tracker struct {
 	ID     string      `json:"id"`
 	Name   string      `json:"name"`
 	Type   TrackerType `json:"type"`
+	Unit   string      `json:"unit,omitempty"`
 	Target *float64    `json:"target,omitempty"` // nil = no target
 	Order  int         `json:"order"`
 }
@@ -37,6 +42,7 @@ func NewTracker(name string, t TrackerType) Tracker {
 		ID:   uuid.New().String(),
 		Name: name,
 		Type: t,
+		Unit: DefaultUnit(name, t),
 	}
 }
 
@@ -61,8 +67,39 @@ type Config struct {
 	Categories    []Category `json:"categories"`
 }
 
+func DefaultUnit(name string, t TrackerType) string {
+	switch t {
+	case TrackerDuration:
+		return "minutes"
+	case TrackerCount:
+		return "count"
+	case TrackerNumeric:
+		if strings.EqualFold(strings.TrimSpace(name), "Weight") {
+			return "lb"
+		}
+		return "value"
+	default:
+		return ""
+	}
+}
+
+func NormalizeConfig(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	for catIdx := range cfg.Categories {
+		for trackerIdx := range cfg.Categories[catIdx].Trackers {
+			tracker := &cfg.Categories[catIdx].Trackers[trackerIdx]
+			if strings.TrimSpace(tracker.Unit) != "" {
+				continue
+			}
+			tracker.Unit = DefaultUnit(tracker.Name, tracker.Type)
+		}
+	}
+}
+
 type Entry struct {
-	Date string                 `json:"date"`
+	Date string `json:"date"`
 	// Data maps tracker UUID to its value.
 	// Values must be exactly: bool (binary), float64 (duration/count/numeric/rating), string (text).
 	// Never store int — JSON round-trips will convert it to float64, breaking type assertions.

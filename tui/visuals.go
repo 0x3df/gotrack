@@ -118,12 +118,12 @@ func Heatmap(data []bool, offset int) string {
 
 	activeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00D855"))
 	inactiveStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
-	
+
 	// Map chronological data into columns.
 	for i, done := range padded {
 		col := i / 7
 		row := i % 7 // Sunday = 0
-		
+
 		char := "■"
 		if i < offset {
 			grid[row][col] = " " // Empty space for padding
@@ -138,7 +138,7 @@ func Heatmap(data []bool, offset int) string {
 	var result []string
 	dayLabels := []string{"S", "M", "T", "W", "T", "F", "S"}
 	for i := 0; i < 7; i++ {
-		rowStr := lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render(dayLabels[i]+" ")
+		rowStr := lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render(dayLabels[i] + " ")
 		rowStr += strings.Join(grid[i], " ")
 		result = append(result, rowStr)
 	}
@@ -146,7 +146,7 @@ func Heatmap(data []bool, offset int) string {
 	return strings.Join(result, "\n")
 }
 
-// VerticalBarChart creates a column-based bar chart. 
+// VerticalBarChart creates a column-based bar chart.
 // Uses vertical block elements.
 func VerticalBarChart(counts []int, labels []string) string {
 	if len(counts) == 0 {
@@ -164,15 +164,19 @@ func VerticalBarChart(counts []int, labels []string) string {
 	}
 
 	blocks := []string{" ", "▂", "▃", "▄", "▅", "▆", "▇", "█"}
-	
+
 	barRow := ""
 	for _, v := range counts {
 		idx := int(math.Round((float64(v) / float64(max)) * float64(len(blocks)-1)))
-		if idx < 0 { idx = 0 }
-		if idx >= len(blocks) { idx = len(blocks)-1 }
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= len(blocks) {
+			idx = len(blocks) - 1
+		}
 		barRow += lipgloss.NewStyle().Foreground(lipgloss.Color("#00ADD8")).Render(blocks[idx]) + "  "
 	}
-	
+
 	labelRow := ""
 	for _, l := range labels {
 		labelRow += lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render(l) + " "
@@ -193,11 +197,19 @@ func ScatterPlot(xVals []float64, yVals []float64, xLabel, yLabel string) string
 
 	var maxX, maxY float64
 	for i := range xVals {
-		if xVals[i] > maxX { maxX = xVals[i] }
-		if yVals[i] > maxY { maxY = yVals[i] }
+		if xVals[i] > maxX {
+			maxX = xVals[i]
+		}
+		if yVals[i] > maxY {
+			maxY = yVals[i]
+		}
 	}
-	if maxX == 0 { maxX = 1 }
-	if maxY == 0 { maxY = 1 }
+	if maxX == 0 {
+		maxX = 1
+	}
+	if maxY == 0 {
+		maxY = 1
+	}
 
 	// Initialize empty grid
 	grid := make([][]string, gridHeight)
@@ -212,29 +224,37 @@ func ScatterPlot(xVals []float64, yVals []float64, xLabel, yLabel string) string
 	dotStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F87")).Bold(true)
 	for i := range xVals {
 		xIdx := int(math.Round((xVals[i] / maxX) * float64(gridWidth-1)))
-		yIdx := gridHeight - 1 - int(math.Round((yVals[i] / maxY) * float64(gridHeight-1))) // invert Y so 0 is at bottom
-		
-		if xIdx < 0 { xIdx = 0 }
-		if xIdx >= gridWidth { xIdx = gridWidth - 1 }
-		if yIdx < 0 { yIdx = 0 }
-		if yIdx >= gridHeight { yIdx = gridHeight - 1 }
+		yIdx := gridHeight - 1 - int(math.Round((yVals[i]/maxY)*float64(gridHeight-1))) // invert Y so 0 is at bottom
+
+		if xIdx < 0 {
+			xIdx = 0
+		}
+		if xIdx >= gridWidth {
+			xIdx = gridWidth - 1
+		}
+		if yIdx < 0 {
+			yIdx = 0
+		}
+		if yIdx >= gridHeight {
+			yIdx = gridHeight - 1
+		}
 
 		grid[yIdx][xIdx] = dotStyle.Render("•")
 	}
 
 	// Render grid with simple axes
 	var result []string
-	
+
 	// Top Y label
 	result = append(result, lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render(fmt.Sprintf("%v (%.0f max)", yLabel, maxY)))
-	
+
 	for _, row := range grid {
 		result = append(result, "│"+strings.Join(row, ""))
 	}
-	
+
 	// X axis line
 	result = append(result, "└"+strings.Repeat("─", gridWidth))
-	
+
 	// X axis label
 	xLabelLine := fmt.Sprintf("%*s", gridWidth, fmt.Sprintf("%s (%.0f max)", xLabel, maxX))
 	result = append(result, " "+lipgloss.NewStyle().Foreground(lipgloss.Color("#888")).Render(xLabelLine))
@@ -246,21 +266,22 @@ func ScatterPlot(xVals []float64, yVals []float64, xLabel, yLabel string) string
 func renderLineChart(series []float64, t models.Tracker) string {
 	if len(series) < 2 {
 		if len(series) == 1 {
-			res := fmt.Sprintf("Latest: %.1f", series[0])
+			res := fmt.Sprintf("Latest: %s", formatValueWithUnit(series[0], t))
 			if t.Target != nil {
 				pct := (series[0] / *t.Target) * 100
-				res += "\nGoal Completion:\n" + ProgressBar(pct, 28)
+				res += fmt.Sprintf("\nTarget: %s\nGoal Completion:\n%s",
+					formatValueWithUnit(*t.Target, t), ProgressBar(pct, 28))
 			}
 			return res
 		}
 		return "Not enough data yet."
 	}
 
-	unit := ""
-	if t.Type == models.TrackerDuration {
-		unit = " (min)"
-	}
+	unit := trackerUnit(t)
 	label := fmt.Sprintf("Last %d entries%s", len(series), unit)
+	if unit != "" {
+		label = fmt.Sprintf("Last %d entries (%s)", len(series), unit)
+	}
 	chart := asciigraph.Plot(series, asciigraph.Height(4), asciigraph.Width(28))
 
 	extra := ""
@@ -273,8 +294,8 @@ func renderLineChart(series []float64, t models.Tracker) string {
 				hitCount++
 			}
 		}
-		extra = fmt.Sprintf("\nLatest Goal: %s\nTarget %.0f: hit %d/%d days",
-			ProgressBar(pct, 28), *t.Target, hitCount, len(series))
+		extra = fmt.Sprintf("\nLatest Goal: %s\nTarget %s: hit %d/%d days",
+			ProgressBar(pct, 28), formatValueWithUnit(*t.Target, t), hitCount, len(series))
 	}
 
 	return label + "\n" + chart + extra
