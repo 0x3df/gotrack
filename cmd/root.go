@@ -12,7 +12,7 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "dailytrack",
+	Use:   "gotrack",
 	Short: "A local-first daily tracking dashboard",
 	Run: func(cmd *cobra.Command, args []string) {
 		cfg, err := db.LoadConfig()
