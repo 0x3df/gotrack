@@ -21,15 +21,21 @@ In settings (`s`), find the Obsidian section. Enter your vault path and optional
 **What are all the keyboard shortcuts?**
 
 - `a`: add/edit entry
+- `x`: quick entry for one tracker value today
+- `p`: pomodoro timer for a duration tracker
 - `d`: delete entry
 - `s`: settings
 - `esc`: cancel/back
 - `h`/`l` or `←`/`→`: switch tabs
 - `j`/`k` or `↓`/`↑`: scroll
+- `?`: open the keybinds popup window
 - `q`: quit
 
 **How do I navigate between views?**  
 Use `h`/`l` or the arrow keys to switch between dashboard tabs (overview, trends, correlations).
+
+**How do I see keybinds inside the app?**  
+Press `?` from the dashboard to open the keybinds popup window. Press `?`, `esc`, or `q` to close it.
 
 ### Visual customization
 

@@ -24,15 +24,19 @@ import (
 type appState int
 
 const (
-	stateSetup         appState = iota // first-launch wizard
-	stateDashboard                     // main tabs
-	stateEntryDate                     // pick date before entry form
-	stateForm                          // daily entry
-	stateSettings                      // settings/config editor
-	stateDeleteDate                    // pick date to delete
-	stateDeleteConfirm                 // confirm deletion
-	stateHelp                          // full-screen help overlay
-	stateEditPick                      // pick an existing entry to edit
+	stateSetup          appState = iota // first-launch wizard
+	stateDashboard                      // main tabs
+	stateEntryDate                      // pick date before entry form
+	stateForm                           // daily entry
+	stateSettings                       // settings/config editor
+	stateDeleteDate                     // pick date to delete
+	stateDeleteConfirm                  // confirm deletion
+	stateHelp                           // full-screen help overlay
+	stateEditPick                       // pick an existing entry to edit
+	stateQuickPick                      // pick tracker for quick entry
+	stateQuickValue                     // enter one tracker value
+	statePomodoroSetup                  // choose tracker and duration
+	statePomodoroActive                 // running pomodoro timer
 )
 
 type Model struct {
@@ -72,6 +76,17 @@ type Model struct {
 	strPtrs  map[string]*string
 	intPtrs  map[string]*int
 	textIDs  map[string]bool
+
+	// Quick entry
+	quickTrackerID string
+	quickValue     string
+
+	// Pomodoro
+	pomodoroTrackerID string
+	pomodoroMinutes   string
+	pomodoroStarted   time.Time
+	pomodoroDuration  time.Duration
+	pomodoroNow       time.Time
 }
 
 type keyMap struct {
@@ -90,6 +105,8 @@ type keyMap struct {
 	Undo     key.Binding
 	Dismiss  key.Binding
 	Edit     key.Binding
+	Quick    key.Binding
+	Pomodoro key.Binding
 }
 
 var keys = keyMap{
@@ -107,15 +124,25 @@ var keys = keyMap{
 	Undo:     key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "undo last save")),
 	Dismiss:  key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "dismiss reminder")),
 	Edit:     key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit recent entry")),
+	Quick:    key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "quick entry")),
+	Pomodoro: key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pomodoro")),
 	Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Left, k.Right, k.Up, k.Down, k.HeroPrev, k.HeroNext, k.Add, k.Delete, k.Settings, k.Quit}
+	return []key.Binding{k.Left, k.Right, k.Up, k.Down, k.HeroPrev, k.HeroNext, k.Add, k.Quick, k.Pomodoro, k.Settings, k.Help, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Left, k.Right, k.Up, k.Down, k.HeroPrev, k.HeroNext, k.Add, k.Delete, k.Settings, k.Quit}}
+	return [][]key.Binding{{k.Left, k.Right, k.Up, k.Down, k.HeroPrev, k.HeroNext, k.Add, k.Quick, k.Pomodoro, k.Delete, k.Settings, k.Quit}}
+}
+
+type pomodoroTickMsg time.Time
+
+func pomodoroTick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return pomodoroTickMsg(t)
+	})
 }
 
 func InitialModel(cfg *models.Config) Model {
@@ -170,6 +197,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, starfieldTick()
 		}
+	case pomodoroTickMsg:
+		if m.state == statePomodoroActive {
+			m.pomodoroNow = time.Time(msg)
+			if !m.pomodoroStarted.IsZero() && m.pomodoroNow.Sub(m.pomodoroStarted) >= m.pomodoroDuration {
+				if err := m.completePomodoro(time.Now().Format("2006-01-02"), m.pomodoroStarted.Add(m.pomodoroDuration)); err != nil {
+					fmt.Fprintf(os.Stderr, "gotrack: failed to save pomodoro: %v\n", err)
+				}
+				m.state = stateDashboard
+				m.entries, _ = db.GetAllEntries()
+				m.triggerDashboardCelebration()
+				m.syncViewport()
+				if m.config != nil && m.config.App.Background.StarfieldEnabled {
+					return m, starfieldTick()
+				}
+				return m, nil
+			}
+			return m, pomodoroTick()
+		}
 	case setupDoneMsg:
 		m.config = msg.cfg
 		m.state = stateDashboard
@@ -208,6 +253,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateDateForm(msg)
 	case stateEditPick:
 		return m.updateEditPick(msg)
+	case stateQuickPick, stateQuickValue:
+		return m.updateQuickEntry(msg)
+	case statePomodoroSetup:
+		return m.updatePomodoroSetup(msg)
+	case statePomodoroActive:
+		return m.updatePomodoroActive(msg)
 	case stateDeleteConfirm:
 		return m.updateDeleteConfirm(msg)
 	case stateHelp:
@@ -335,11 +386,258 @@ func (m Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.state = stateEditPick
 			return m, m.dateForm.Init()
+		case key.Matches(msg, keys.Quick):
+			m.initQuickPick()
+			if m.dateForm == nil {
+				return m, nil
+			}
+			m.state = stateQuickPick
+			return m, m.dateForm.Init()
+		case key.Matches(msg, keys.Pomodoro):
+			m.initPomodoroSetup()
+			if m.dateForm == nil {
+				return m, nil
+			}
+			m.state = statePomodoroSetup
+			return m, m.dateForm.Init()
 		}
 	}
 
 	m.vp, cmd = m.vp.Update(msg)
 	return m, cmd
+}
+
+func quickEntryTrackers(cfg *models.Config) []models.Tracker {
+	if cfg == nil {
+		return nil
+	}
+	var trackers []models.Tracker
+	for _, cat := range cfg.Categories {
+		trackers = append(trackers, cat.Trackers...)
+	}
+	return trackers
+}
+
+func durationTrackers(cfg *models.Config) []models.Tracker {
+	if cfg == nil {
+		return nil
+	}
+	var trackers []models.Tracker
+	for _, cat := range cfg.Categories {
+		for _, t := range cat.Trackers {
+			if t.Type == models.TrackerDuration {
+				trackers = append(trackers, t)
+			}
+		}
+	}
+	return trackers
+}
+
+func trackerByID(cfg *models.Config, id string) (models.Tracker, bool) {
+	for _, cat := range cfg.Categories {
+		for _, t := range cat.Trackers {
+			if t.ID == id {
+				return t, true
+			}
+		}
+	}
+	return models.Tracker{}, false
+}
+
+func trackerSelectOptions(trackers []models.Tracker) []huh.Option[string] {
+	opts := make([]huh.Option[string], 0, len(trackers))
+	for _, t := range trackers {
+		opts = append(opts, huh.NewOption(t.Name, t.ID))
+	}
+	return opts
+}
+
+func (m *Model) initQuickPick() {
+	trackers := quickEntryTrackers(m.config)
+	if len(trackers) == 0 {
+		m.dateForm = nil
+		return
+	}
+	m.quickTrackerID = trackers[0].ID
+	m.dateForm = huh.NewForm(huh.NewGroup(
+		huh.NewSelect[string]().
+			Key("quickTrackerID").
+			Title("Quick entry").
+			Description("Pick one tracker to log for today.").
+			Options(trackerSelectOptions(trackers)...).
+			Value(&m.quickTrackerID),
+	))
+}
+
+func (m *Model) initQuickValue() {
+	t, _ := trackerByID(m.config, m.quickTrackerID)
+	m.quickValue = ""
+	m.dateForm = huh.NewForm(huh.NewGroup(
+		huh.NewInput().
+			Key("quickValue").
+			Title(trackerInputLabel(t)).
+			Description("Enter one value. Existing fields for today are preserved.").
+			Value(&m.quickValue).
+			Validate(func(s string) error {
+				_, err := db.CoerceValue(t, s)
+				return err
+			}),
+	))
+}
+
+func (m Model) updateQuickEntry(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
+		m.state = stateDashboard
+		return m, nil
+	}
+	form, cmd := m.dateForm.Update(msg)
+	if f, ok := form.(*huh.Form); ok {
+		m.dateForm = f
+	}
+	if m.dateForm.State == huh.StateCompleted {
+		if m.state == stateQuickPick {
+			if selected := m.dateForm.GetString("quickTrackerID"); selected != "" {
+				m.quickTrackerID = selected
+			}
+			m.state = stateQuickValue
+			m.initQuickValue()
+			return m, m.dateForm.Init()
+		}
+		if value := m.dateForm.GetString("quickValue"); value != "" {
+			m.quickValue = value
+		}
+		if err := m.saveQuickEntry(time.Now().Format("2006-01-02")); err != nil {
+			fmt.Fprintf(os.Stderr, "gotrack: failed to save quick entry: %v\n", err)
+		}
+		m.entries, _ = db.GetAllEntries()
+		m.triggerDashboardCelebration()
+		m.state = stateDashboard
+		m.syncViewport()
+		if m.config != nil && m.config.App.Background.StarfieldEnabled {
+			return m, starfieldTick()
+		}
+		return m, nil
+	}
+	if m.dateForm.State == huh.StateAborted {
+		m.state = stateDashboard
+		return m, nil
+	}
+	return m, cmd
+}
+
+func (m Model) saveQuickEntry(date string) error {
+	if err := db.UpsertEntryLog(m.config, date, map[string]interface{}{m.quickTrackerID: m.quickValue}); err != nil {
+		return err
+	}
+	entry, err := db.GetEntryForDate(date)
+	if err != nil {
+		return err
+	}
+	return integrations.ExportObsidianEntry(m.config, entry)
+}
+
+func (m *Model) initPomodoroSetup() {
+	trackers := durationTrackers(m.config)
+	if len(trackers) == 0 {
+		m.dateForm = nil
+		return
+	}
+	m.pomodoroTrackerID = trackers[0].ID
+	m.pomodoroMinutes = "25"
+	m.dateForm = huh.NewForm(huh.NewGroup(
+		huh.NewSelect[string]().
+			Key("pomodoroTrackerID").
+			Title("Pomodoro tracker").
+			Description("Pick the duration tracker that should receive this time.").
+			Options(trackerSelectOptions(trackers)...).
+			Value(&m.pomodoroTrackerID),
+		huh.NewInput().
+			Key("pomodoroMinutes").
+			Title("Session length (minutes)").
+			Value(&m.pomodoroMinutes).
+			Validate(func(s string) error {
+				v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+				if err != nil || v <= 0 {
+					return fmt.Errorf("enter a positive number of minutes")
+				}
+				return nil
+			}),
+	))
+}
+
+func (m Model) updatePomodoroSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
+		m.state = stateDashboard
+		return m, nil
+	}
+	form, cmd := m.dateForm.Update(msg)
+	if f, ok := form.(*huh.Form); ok {
+		m.dateForm = f
+	}
+	if m.dateForm.State == huh.StateCompleted {
+		if selected := m.dateForm.GetString("pomodoroTrackerID"); selected != "" {
+			m.pomodoroTrackerID = selected
+		}
+		if minutes := m.dateForm.GetString("pomodoroMinutes"); minutes != "" {
+			m.pomodoroMinutes = minutes
+		}
+		v, err := strconv.ParseFloat(strings.TrimSpace(m.pomodoroMinutes), 64)
+		if err != nil || v <= 0 {
+			m.state = stateDashboard
+			return m, nil
+		}
+		m.pomodoroDuration = time.Duration(v * float64(time.Minute))
+		m.pomodoroStarted = time.Now()
+		m.pomodoroNow = m.pomodoroStarted
+		m.state = statePomodoroActive
+		return m, pomodoroTick()
+	}
+	if m.dateForm.State == huh.StateAborted {
+		m.state = stateDashboard
+		return m, nil
+	}
+	return m, cmd
+}
+
+func (m Model) updatePomodoroActive(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.String() {
+		case "e", "enter", " ":
+			if err := m.completePomodoro(time.Now().Format("2006-01-02"), time.Now()); err != nil {
+				fmt.Fprintf(os.Stderr, "gotrack: failed to save pomodoro: %v\n", err)
+			}
+			m.entries, _ = db.GetAllEntries()
+			m.triggerDashboardCelebration()
+			m.state = stateDashboard
+			m.syncViewport()
+			if m.config != nil && m.config.App.Background.StarfieldEnabled {
+				return m, starfieldTick()
+			}
+			return m, nil
+		case "esc":
+			m.state = stateDashboard
+			if m.config != nil && m.config.App.Background.StarfieldEnabled {
+				return m, starfieldTick()
+			}
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+func (m Model) completePomodoro(date string, ended time.Time) error {
+	elapsed := ended.Sub(m.pomodoroStarted).Minutes()
+	if elapsed <= 0 {
+		return nil
+	}
+	if err := db.AddDurationToEntry(m.config, date, m.pomodoroTrackerID, elapsed); err != nil {
+		return err
+	}
+	entry, err := db.GetEntryForDate(date)
+	if err != nil {
+		return err
+	}
+	return integrations.ExportObsidianEntry(m.config, entry)
 }
 
 func (m *Model) initDateForm(title, description string) {
@@ -717,9 +1015,12 @@ func (m Model) View() string {
 	case stateSetup:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			m.setup.View())
-	case stateEntryDate, stateDeleteDate, stateDeleteConfirm, stateEditPick:
+	case stateEntryDate, stateDeleteDate, stateDeleteConfirm, stateEditPick, stateQuickPick, stateQuickValue, statePomodoroSetup:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			m.dateForm.View())
+	case statePomodoroActive:
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			m.pomodoroView())
 	case stateHelp:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			m.helpOverlay())
@@ -738,6 +1039,47 @@ func (m Model) View() string {
 		// Ensure it doesn't overflow the terminal height, which causes clipping at the top
 		return lipgloss.NewStyle().MaxHeight(m.height).MaxWidth(m.width).Render(view)
 	}
+}
+
+func (m Model) pomodoroView() string {
+	p := palette()
+	now := m.pomodoroNow
+	if now.IsZero() {
+		now = time.Now()
+	}
+	elapsed := now.Sub(m.pomodoroStarted)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	remaining := m.pomodoroDuration - elapsed
+	if remaining < 0 {
+		remaining = 0
+	}
+	t, _ := trackerByID(m.config, m.pomodoroTrackerID)
+	title := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(p.Primary)).
+		Bold(true).
+		Render("Pomodoro")
+	body := strings.Join([]string{
+		fmt.Sprintf("Tracking: %s", t.Name),
+		fmt.Sprintf("Remaining: %s", formatPomodoroDuration(remaining)),
+		fmt.Sprintf("Elapsed:   %s", formatPomodoroDuration(elapsed)),
+		"",
+		"Press e, enter, or space to end and log elapsed time.",
+		"Press esc to cancel without logging.",
+	}, "\n")
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(p.Primary)).
+		Padding(1, 3).
+		Render(lipgloss.JoinVertical(lipgloss.Left, title, "", body))
+}
+
+func formatPomodoroDuration(d time.Duration) string {
+	total := int(d.Round(time.Second).Seconds())
+	minutes := total / 60
+	seconds := total % 60
+	return fmt.Sprintf("%02d:%02d", minutes, seconds)
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────

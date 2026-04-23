@@ -60,6 +60,8 @@ On first launch, GoTrack walks you through a setup wizard so you can:
 ## Controls
 
 - `a`: add or edit an entry for any date
+- `x`: quick entry for one tracker value today
+- `p`: start a pomodoro and allocate elapsed minutes to a duration tracker
 - `d`: delete the entry for a given date
 - `esc`: cancel date/entry form and return to dashboard
 - `s`: open settings and tracking setup
@@ -67,6 +69,7 @@ On first launch, GoTrack walks you through a setup wizard so you can:
 - `h` / `l` or `←` / `→`: switch tabs
 - `j` / `k` or `↓` / `↑`: scroll visualizations
 - `[` / `]`: cycle between overview hero visuals (Yearly Pulse, Tracker Wall, Weekday Rhythm, Momentum Podium)
+- `?`: open the keybinds popup window
 - `q`: quit
 
 Date prompts accept shortcuts: `t` / `today`, `y` / `yesterday`, or `-N` (e.g. `-3` for three days ago).

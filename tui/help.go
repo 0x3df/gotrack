@@ -28,6 +28,8 @@ func (m Model) helpOverlay() string {
 		}},
 		{"Entries", [][2]string{
 			{"a", "add or edit an entry (by date)"},
+			{"x", "quick entry for one tracker today"},
+			{"p", "pomodoro timer for duration tracking"},
 			{"e", "pick a recent entry to edit"},
 			{"d", "delete an entry (with confirm)"},
 			{"u", "undo last save or delete"},

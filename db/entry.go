@@ -79,3 +79,61 @@ func UpsertEntryLog(cfg *models.Config, date string, values map[string]interface
 	entry := &models.Entry{Date: date, Data: data}
 	return UpsertEntry(entry)
 }
+
+// AddDurationToEntry adds minutes to a duration tracker on the entry for date.
+// It preserves all other tracker values and creates the entry when needed.
+func AddDurationToEntry(cfg *models.Config, date string, trackerID string, minutes float64) error {
+	if cfg == nil {
+		return fmt.Errorf("no config loaded")
+	}
+	if minutes <= 0 {
+		return fmt.Errorf("minutes must be positive")
+	}
+
+	var tracker models.Tracker
+	found := false
+	for _, cat := range cfg.Categories {
+		for _, t := range cat.Trackers {
+			if t.ID == trackerID {
+				tracker = t
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("tracker %q not found", trackerID)
+	}
+	if tracker.Type != models.TrackerDuration {
+		return fmt.Errorf("%s is not a duration tracker", tracker.Name)
+	}
+
+	existing, err := GetEntryForDate(date)
+	if err != nil {
+		return err
+	}
+	data := map[string]interface{}{}
+	if existing != nil && existing.Data != nil {
+		for k, v := range existing.Data {
+			data[k] = v
+		}
+	}
+
+	current := 0.0
+	if raw, ok := data[trackerID]; ok {
+		switch v := raw.(type) {
+		case float64:
+			current = v
+		case int:
+			current = float64(v)
+		default:
+			return fmt.Errorf("%s has non-numeric existing value", tracker.Name)
+		}
+	}
+	data[trackerID] = current + minutes
+
+	return UpsertEntry(&models.Entry{Date: date, Data: data})
+}
