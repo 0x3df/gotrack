@@ -17,9 +17,8 @@ var defaultProductivityTrackers = []struct {
 	Type models.TrackerType
 }{
 	{"Coursework", models.TrackerBinary},
-	{"Coding", models.TrackerBinary},
-	{"Real Project Progress", models.TrackerBinary},
-	{"Content Creation", models.TrackerBinary},
+	{"Writing", models.TrackerBinary},
+	{"Reading", models.TrackerBinary},
 	{"Deep Work", models.TrackerDuration},
 }
 
@@ -69,10 +68,8 @@ var categoryColors = map[string]string{
 	"Non-Negotiables": "#00ADD8",
 	"Coursework":      "#00ADD8",
 	"Chinese":         "#EF4444",
-	"Japanese":        "#F97316",
-	"Programming":     "#06B6D4",
+	"Spanish":         "#F97316",
 	"Art":             "#EC4899",
-	"Game Dev":        "#8B5CF6",
 	"Content":         "#EAB308",
 	"Optional":        "#64748B",
 }
@@ -109,7 +106,7 @@ type TrackerPack struct {
 var Packs = []TrackerPack{
 	{
 		Name:        "Power",
-		Description: "Deep AJATT-style language + programming + art + gamedev framework with per-area hour targets.",
+		Description: "Deep AJATT-style language + coursework + art framework with per-area hour targets.",
 		Build:       buildPowerPack,
 	},
 	{
@@ -119,7 +116,6 @@ var Packs = []TrackerPack{
 			focus := models.NewCategory("Focus", categoryColors["Focus"])
 			focus.Trackers = []models.Tracker{
 				models.NewTracker("Deep Work", models.TrackerDuration),
-				models.NewTracker("Coding", models.TrackerBinary),
 				models.NewTracker("Writing", models.TrackerBinary),
 				models.NewTracker("Reading", models.TrackerBinary),
 				models.NewTracker("Distractions", models.TrackerCount),
@@ -263,11 +259,11 @@ func powerPack() ([]models.Category, []models.NonNegotiableGroup) {
 		minutesTracker("Shadowing / Chorusing"),
 	}
 
-	japanese := models.NewCategory("Japanese", categoryColors["Japanese"])
-	japanese.DailyMinMinutes = ptrF(130)
-	japanese.DailyMaxMinutes = ptrF(220)
-	japanese.WeeklyMinutes = ptrF(1100)
-	japanese.Trackers = []models.Tracker{
+	spanish := models.NewCategory("Spanish", categoryColors["Spanish"])
+	spanish.DailyMinMinutes = ptrF(130)
+	spanish.DailyMaxMinutes = ptrF(220)
+	spanish.WeeklyMinutes = ptrF(1100)
+	spanish.Trackers = []models.Tracker{
 		minutesTracker("CI / Input"),
 		minutesTracker("Rewatch"),
 		minutesTracker("Active Listening"),
@@ -278,20 +274,6 @@ func powerPack() ([]models.Category, []models.NonNegotiableGroup) {
 		minutesTracker("Class Review"),
 	}
 
-	programming := models.NewCategory("Programming", categoryColors["Programming"])
-	programming.DailyMinMinutes = ptrF(120)
-	programming.DailyMaxMinutes = ptrF(180)
-	programming.WeeklyMinutes = ptrF(1020)
-	programming.Trackers = []models.Tracker{
-		minutesTracker("C++ Study"),
-		minutesTracker("DS&A / LeetCode"),
-		minutesTracker("Real Coding Reps"),
-		minutesTracker("Engine / Gameplay Work"),
-		minutesTracker("Graphics / Shaders"),
-		minutesTracker("Python Tooling"),
-		minutesTracker("Refactor / Cleanup"),
-	}
-
 	art := models.NewCategory("Art", categoryColors["Art"])
 	art.DailyMinMinutes = ptrF(60)
 	art.DailyMaxMinutes = ptrF(120)
@@ -299,32 +281,16 @@ func powerPack() ([]models.Category, []models.NonNegotiableGroup) {
 	art.Trackers = []models.Tracker{
 		minutesTracker("Drawing Fundamentals"),
 		minutesTracker("Visual Study"),
-		minutesTracker("Pixel / Sprite Work"),
 		minutesTracker("UI / Icon / Asset Work"),
 		minutesTracker("Concept / Ideation"),
 		minutesTracker("Animation Study"),
-		minutesTracker("Blender Work"),
-	}
-
-	gamedev := models.NewCategory("Game Dev", categoryColors["Game Dev"])
-	gamedev.DailyMinMinutes = ptrF(90)
-	gamedev.DailyMaxMinutes = ptrF(150)
-	gamedev.WeeklyMinutes = ptrF(840)
-	gamedev.Trackers = []models.Tracker{
-		minutesTracker("Feature / System Moved"),
-		minutesTracker("Code + Visuals Integrated"),
-		minutesTracker("Polish / Feel Pass"),
-		minutesTracker("Animation / VFX / Feedback"),
-		minutesTracker("Testing / Bug Fixing"),
-		models.NewTracker("Kept Playable", models.TrackerBinary),
-		models.NewTracker("Scoped Task Discipline", models.TrackerBinary),
 	}
 
 	content := models.NewCategory("Content", categoryColors["Content"])
 	content.Trackers = []models.Tracker{
 		minutesTracker("Editing Time"),
 		models.NewTracker("Progress Clip Captured", models.TrackerBinary),
-		models.NewTracker("Dev / Learning Note", models.TrackerBinary),
+		models.NewTracker("Learning Note", models.TrackerBinary),
 	}
 
 	health := models.NewCategory("Health", categoryColors["Health"])
@@ -340,25 +306,20 @@ func powerPack() ([]models.Category, []models.NonNegotiableGroup) {
 	optional := models.NewCategory("Optional", categoryColors["Optional"])
 	optional.Trackers = []models.Tracker{
 		minutesTracker("Audio / Music Experiment"),
-		minutesTracker("VFX / Shader Experiment"),
 		minutesTracker("Repo Cleanup / Organization"),
 	}
 
 	cats := []models.Category{
-		reflection, coursework, chinese, japanese,
-		programming, art, gamedev, content, health, optional,
+		reflection, coursework, chinese, spanish,
+		art, content, health, optional,
 	}
 
 	groups := []models.NonNegotiableGroup{
 		{Label: "Coursework", Categories: []string{"Coursework"},
 			DailyMinMinutes: ptrF(120), DailyMaxMinutes: ptrF(180), WeeklyMinutes: ptrF(1020)},
-		{Label: "Programming", Categories: []string{"Programming"},
-			DailyMinMinutes: ptrF(120), DailyMaxMinutes: ptrF(180), WeeklyMinutes: ptrF(1020)},
 		{Label: "Art", Categories: []string{"Art"},
 			DailyMinMinutes: ptrF(60), DailyMaxMinutes: ptrF(120), WeeklyMinutes: ptrF(600)},
-		{Label: "Game Dev", Categories: []string{"Game Dev"},
-			DailyMinMinutes: ptrF(90), DailyMaxMinutes: ptrF(150), WeeklyMinutes: ptrF(840)},
-		{Label: "Languages", Categories: []string{"Chinese", "Japanese"},
+		{Label: "Languages", Categories: []string{"Chinese", "Spanish"},
 			DailyMinMinutes: ptrF(195), DailyMaxMinutes: ptrF(300), WeeklyMinutes: ptrF(1700)},
 		{Label: "Health", Categories: []string{"Health"},
 			DailyMinMinutes: ptrF(45), DailyMaxMinutes: ptrF(90),

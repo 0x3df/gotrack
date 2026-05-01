@@ -71,11 +71,13 @@ type Model struct {
 	deleteConfirmed *bool
 
 	// Entry form
-	form     *huh.Form
-	boolPtrs map[string]*bool
-	strPtrs  map[string]*string
-	intPtrs  map[string]*int
-	textIDs  map[string]bool
+	form        *huh.Form
+	boolPtrs    map[string]*bool
+	strPtrs     map[string]*string
+	intPtrs     map[string]*int
+	textIDs     map[string]bool
+	catDonePtrs map[string]*bool // per-category "did you do this today?" gate
+	catTrackers map[string][]string // catID -> tracker IDs in that category
 
 	// Quick entry
 	quickTrackerID string
@@ -846,86 +848,48 @@ func (m *Model) initForm(entry *models.Entry) {
 	m.strPtrs = make(map[string]*string)
 	m.intPtrs = make(map[string]*int)
 	m.textIDs = make(map[string]bool)
+	m.catDonePtrs = make(map[string]*bool)
+	m.catTrackers = make(map[string][]string)
+
+	// Split categories: reflection last, rest first.
+	var mainCats, reflectionCats []models.Category
+	for _, cat := range m.config.Categories {
+		if strings.EqualFold(cat.Name, "reflection") {
+			reflectionCats = append(reflectionCats, cat)
+		} else {
+			mainCats = append(mainCats, cat)
+		}
+	}
+	orderedCats := append(mainCats, reflectionCats...)
 
 	var groups []*huh.Group
 
-	for _, cat := range m.config.Categories {
-		var fields []huh.Field
-		for _, t := range cat.Trackers {
-			switch t.Type {
-			case models.TrackerBinary:
-				b := prefillBoolValue(entryData(entry), t.ID)
-				m.boolPtrs[t.ID] = &b
-				fields = append(fields, huh.NewConfirm().Title(t.Name).Value(&b))
-
-			case models.TrackerDuration:
-				s := prefillStringValue(entryData(entry), t.ID)
-				m.strPtrs[t.ID] = &s
-				fields = append(fields, huh.NewInput().Title(trackerInputLabel(t)).Value(&s).
-					Validate(func(s string) error {
-						if s == "" {
-							return nil
-						}
-						v, err := strconv.ParseFloat(s, 64)
-						if err != nil || v <= 0 {
-							return fmt.Errorf("enter a positive number")
-						}
-						return nil
-					}))
-
-			case models.TrackerCount:
-				s := prefillStringValue(entryData(entry), t.ID)
-				m.strPtrs[t.ID] = &s
-				fields = append(fields, huh.NewInput().Title(trackerInputLabel(t)).Value(&s).
-					Validate(func(s string) error {
-						if s == "" {
-							return nil
-						}
-						v, err := strconv.ParseFloat(s, 64)
-						if err != nil || v < 0 {
-							return fmt.Errorf("enter a number")
-						}
-						return nil
-					}))
-
-			case models.TrackerNumeric:
-				s := prefillStringValue(entryData(entry), t.ID)
-				m.strPtrs[t.ID] = &s
-				fields = append(fields, huh.NewInput().Title(trackerInputLabel(t)).Value(&s).
-					Validate(func(s string) error {
-						if s == "" {
-							return nil
-						}
-						_, err := strconv.ParseFloat(s, 64)
-						if err != nil {
-							return fmt.Errorf("enter a number")
-						}
-						return nil
-					}))
-
-			case models.TrackerRating:
-				v := prefillIntValue(entryData(entry), t.ID, 3)
-				m.intPtrs[t.ID] = &v
-				fields = append(fields, huh.NewSelect[int]().
-					Title(t.Name).
-					Options(
-						huh.NewOption("1 — rough day", 1),
-						huh.NewOption("2 — below average", 2),
-						huh.NewOption("3 — okay", 3),
-						huh.NewOption("4 — good day", 4),
-						huh.NewOption("5 — great day", 5),
-					).
-					Value(&v))
-
-			case models.TrackerText:
-				s := prefillStringValue(entryData(entry), t.ID)
-				m.strPtrs[t.ID] = &s
-				m.textIDs[t.ID] = true
-				fields = append(fields, huh.NewText().Title(t.Name).Value(&s))
-			}
+	for _, cat := range orderedCats {
+		cat := cat // capture loop var for closures
+		fields := m.buildCategoryFields(entry, cat)
+		if len(fields) == 0 {
+			continue
 		}
-		if len(fields) > 0 {
+
+		isReflection := strings.EqualFold(cat.Name, "reflection")
+		if isReflection {
 			groups = append(groups, huh.NewGroup(fields...).Title(cat.Name))
+		} else {
+			done := entry != nil && m.catHasData(entry, cat)
+			m.catDonePtrs[cat.ID] = &done
+			donePtr := m.catDonePtrs[cat.ID]
+
+			gateGroup := huh.NewGroup(
+				huh.NewConfirm().
+					Title(cat.Name).
+					Description("Did you do this today?").
+					Value(donePtr),
+			)
+			trackerGroup := huh.NewGroup(fields...).
+				Title(cat.Name).
+				WithHideFunc(func() bool { return !*donePtr })
+
+			groups = append(groups, gateGroup, trackerGroup)
 		}
 	}
 
@@ -935,6 +899,101 @@ func (m *Model) initForm(entry *models.Entry) {
 		return
 	}
 	m.form = huh.NewForm(groups...)
+}
+
+func (m *Model) buildCategoryFields(entry *models.Entry, cat models.Category) []huh.Field {
+	var fields []huh.Field
+	var trackerIDs []string
+	for _, t := range cat.Trackers {
+		t := t
+		trackerIDs = append(trackerIDs, t.ID)
+		switch t.Type {
+		case models.TrackerBinary:
+			b := prefillBoolValue(entryData(entry), t.ID)
+			m.boolPtrs[t.ID] = &b
+			fields = append(fields, huh.NewConfirm().Title(t.Name).Value(&b))
+
+		case models.TrackerDuration:
+			s := prefillStringValue(entryData(entry), t.ID)
+			m.strPtrs[t.ID] = &s
+			fields = append(fields, huh.NewInput().Title(trackerInputLabel(t)).Value(&s).
+				Validate(func(s string) error {
+					if s == "" {
+						return nil
+					}
+					v, err := strconv.ParseFloat(s, 64)
+					if err != nil || v <= 0 {
+						return fmt.Errorf("enter a positive number")
+					}
+					return nil
+				}))
+
+		case models.TrackerCount:
+			s := prefillStringValue(entryData(entry), t.ID)
+			m.strPtrs[t.ID] = &s
+			fields = append(fields, huh.NewInput().Title(trackerInputLabel(t)).Value(&s).
+				Validate(func(s string) error {
+					if s == "" {
+						return nil
+					}
+					v, err := strconv.ParseFloat(s, 64)
+					if err != nil || v < 0 {
+						return fmt.Errorf("enter a number")
+					}
+					return nil
+				}))
+
+		case models.TrackerNumeric:
+			s := prefillStringValue(entryData(entry), t.ID)
+			m.strPtrs[t.ID] = &s
+			fields = append(fields, huh.NewInput().Title(trackerInputLabel(t)).Value(&s).
+				Validate(func(s string) error {
+					if s == "" {
+						return nil
+					}
+					_, err := strconv.ParseFloat(s, 64)
+					if err != nil {
+						return fmt.Errorf("enter a number")
+					}
+					return nil
+				}))
+
+		case models.TrackerRating:
+			v := prefillIntValue(entryData(entry), t.ID, 3)
+			m.intPtrs[t.ID] = &v
+			fields = append(fields, huh.NewSelect[int]().
+				Title(t.Name).
+				Options(
+					huh.NewOption("1 — rough day", 1),
+					huh.NewOption("2 — below average", 2),
+					huh.NewOption("3 — okay", 3),
+					huh.NewOption("4 — good day", 4),
+					huh.NewOption("5 — great day", 5),
+				).
+				Value(&v))
+
+		case models.TrackerText:
+			s := prefillStringValue(entryData(entry), t.ID)
+			m.strPtrs[t.ID] = &s
+			m.textIDs[t.ID] = true
+			fields = append(fields, huh.NewText().Title(t.Name).Value(&s))
+		}
+	}
+	m.catTrackers[cat.ID] = trackerIDs
+	return fields
+}
+
+// catHasData reports whether any tracker in cat has a value in entry.
+func (m *Model) catHasData(entry *models.Entry, cat models.Category) bool {
+	if entry == nil {
+		return false
+	}
+	for _, t := range cat.Trackers {
+		if _, ok := entry.Data[t.ID]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -974,11 +1033,24 @@ func (m *Model) saveEntry() {
 	m.undoHad = true
 	data := make(map[string]interface{})
 
+	// Build set of tracker IDs that belong to skipped (gated-off) categories.
+	skippedTrackers := make(map[string]bool)
+	for catID, donePtr := range m.catDonePtrs {
+		if !*donePtr {
+			for _, tid := range m.catTrackers[catID] {
+				skippedTrackers[tid] = true
+			}
+		}
+	}
+
 	for id, ptr := range m.boolPtrs {
+		if skippedTrackers[id] {
+			continue
+		}
 		data[id] = *ptr
 	}
 	for id, ptr := range m.strPtrs {
-		if *ptr == "" {
+		if skippedTrackers[id] || *ptr == "" {
 			continue
 		}
 		if m.textIDs[id] {
@@ -990,6 +1062,9 @@ func (m *Model) saveEntry() {
 		}
 	}
 	for id, ptr := range m.intPtrs {
+		if skippedTrackers[id] {
+			continue
+		}
 		data[id] = float64(*ptr)
 	}
 
