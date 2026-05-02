@@ -101,7 +101,8 @@ type Model struct {
 	pomodoroNow       time.Time
 
 	// Status / feedback
-	statusMsg string
+	statusMsg     string
+	statusIsError bool
 
 	// Confirm dialogs
 	abandonConfirm *bool
@@ -201,6 +202,7 @@ func (m Model) Init() tea.Cmd {
 	}
 	if syncCmd := runSyncCmd(m.config); syncCmd != nil {
 		m.statusMsg = "Syncing…"
+		m.statusIsError = false
 		cmds = append(cmds, syncCmd)
 	}
 	return tea.Batch(cmds...)
@@ -239,6 +241,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.pomodoroStarted.IsZero() && m.pomodoroNow.Sub(m.pomodoroStarted) >= m.pomodoroDuration {
 				if err := m.completePomodoro(time.Now().Format("2006-01-02"), m.pomodoroStarted.Add(m.pomodoroDuration)); err != nil {
 					m.statusMsg = fmt.Sprintf("Pomodoro save failed: %v", err)
+					m.statusIsError = true
 				}
 				m.state = stateDashboard
 				m.entries, _ = db.GetAllEntries()
@@ -283,12 +286,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.setup.Init()
 	case statusClearMsg:
 		m.statusMsg = ""
+		m.statusIsError = false
 		return m, nil
 	case syncDoneMsg:
 		if msg.err != nil {
 			m.statusMsg = fmt.Sprintf("Sync failed: %v", msg.err)
+			m.statusIsError = true
 		} else {
 			m.statusMsg = "Sync complete"
+			m.statusIsError = false
 		}
 		m.entries, _ = db.GetAllEntries()
 		m.syncViewport()
@@ -1632,10 +1638,16 @@ func (m Model) dashboardView() string {
 
 	var statusBar string
 	if m.statusMsg != "" {
+		color := p.Success
+		icon := "✓ "
+		if m.statusIsError {
+			color = p.Danger
+			icon = "⚠ "
+		}
 		statusBar = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(p.Danger)).Bold(true).
+			Foreground(lipgloss.Color(color)).Bold(true).
 			Align(lipgloss.Center).Width(layout.ContentWidth).
-			Render("⚠ " + m.statusMsg)
+			Render(icon + m.statusMsg)
 	}
 
 	parts := []string{titleStyle.Render(bannerForWidth(layout.ContentWidth))}
