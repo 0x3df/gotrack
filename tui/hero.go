@@ -72,10 +72,10 @@ func (m Model) renderHero(outerWidth int) string {
 		strings.Join(dots, " "), idx+1, len(heroVisuals)))
 	footer = lipgloss.NewStyle().Width(innerWidth).Align(lipgloss.Center).Render(footer)
 
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		titleStyle.Render(viz.Title),
+	content := lipgloss.JoinVertical(lipgloss.Center,
+		titleStyle.Width(innerWidth).Align(lipgloss.Center).Render(viz.Title),
 		"",
-		body,
+		lipgloss.NewStyle().Width(innerWidth).Align(lipgloss.Center).Render(body),
 	)
 
 	card := lipgloss.NewStyle().
@@ -84,7 +84,7 @@ func (m Model) renderHero(outerWidth int) string {
 		Padding(1, framePadding).
 		Width(outerWidth - 2).
 		Height(heroHeight - 2).
-		Render(lipgloss.JoinVertical(lipgloss.Left, content, "", footer))
+		Render(lipgloss.JoinVertical(lipgloss.Center, content, "", footer))
 
 	return card
 }

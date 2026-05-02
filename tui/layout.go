@@ -74,14 +74,16 @@ func renderCard(title, accentColor, content string, width, height int) string {
 		Foreground(lipgloss.Color(accentColor)).
 		Bold(true).
 		Width(contentWidth).
-		MaxWidth(contentWidth)
+		MaxWidth(contentWidth).
+		Align(lipgloss.Center)
 
 	titleRendered := titleStyle.Render(title)
 	titleLines := strings.Split(strings.TrimSuffix(titleRendered, "\n"), "\n")
 
 	bodyStyle := lipgloss.NewStyle().
 		Width(contentWidth).
-		MaxWidth(contentWidth)
+		MaxWidth(contentWidth).
+		Align(lipgloss.Center)
 
 	if height > 0 {
 		const titleBodyGapLines = 1 // blank JoinVertical element between title and body
@@ -96,7 +98,7 @@ func renderCard(title, accentColor, content string, width, height int) string {
 	}
 
 	return style.Render(lipgloss.JoinVertical(
-		lipgloss.Left,
+		lipgloss.Center,
 		titleRendered,
 		"",
 		bodyStyle.Render(content),
