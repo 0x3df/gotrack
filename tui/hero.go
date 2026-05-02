@@ -28,6 +28,7 @@ var heroVisuals = []heroVisual{
 	{"wall", "Tracker Wall (last 4 weeks)", renderHeroTrackerWall},
 	{"rhythm", "Weekday Rhythm", renderHeroWeekdayRhythm},
 	{"podium", "Momentum Podium", renderHeroMomentumPodium},
+	{"month", "Month at a Glance", renderHeroMonthCalendar},
 }
 
 // renderHero renders the currently selected hero visual, wrapped in a
@@ -581,6 +582,118 @@ func renderHeroMomentumPodium(m Model, innerWidth, innerHeight int) string {
 			labelW, truncate(trackerLabel[r.TrackerID], labelW),
 			style.Render(sign), bar, mutedStyle.Render(value)))
 	}
+	return strings.Join(out, "\n")
+}
+
+// ─── Hero visual #5: Month at a Glance ───────────────────────────────────
+//
+// Calendar grid for the current month. Each day is colored by how many
+// binary trackers were completed (none → muted, all → success).
+
+func renderHeroMonthCalendar(m Model, innerWidth, innerHeight int) string {
+	p := palette()
+	if m.config == nil {
+		return mutedLine("No config loaded.")
+	}
+
+	binaryIDs := collectBinaryIDs(m.config)
+	now := time.Now()
+	year, month, _ := now.Date()
+
+	// Build a set of date → completion fraction.
+	firstOfMonth := time.Date(year, month, 1, 0, 0, 0, 0, time.Local)
+	daysInMonth := time.Date(year, month+1, 0, 0, 0, 0, 0, time.Local).Day()
+
+	// Precompute per-day binary fraction.
+	fracByDate := make(map[string]float64, daysInMonth)
+	entryByDate := make(map[string]bool, daysInMonth)
+	for _, e := range m.entries {
+		if len(e.Date) >= 7 && e.Date[:7] == fmt.Sprintf("%04d-%02d", year, int(month)) {
+			entryByDate[e.Date] = true
+			if len(binaryIDs) == 0 {
+				fracByDate[e.Date] = 1.0
+				continue
+			}
+			done := 0
+			for _, id := range binaryIDs {
+				if v, ok := e.Data[id].(bool); ok && v {
+					done++
+				}
+			}
+			fracByDate[e.Date] = float64(done) / float64(len(binaryIDs))
+		}
+	}
+
+	// Intensity colors: none logged → muted; partial → primary; all → success.
+	cellColor := func(date string) string {
+		if !entryByDate[date] {
+			return p.Muted
+		}
+		frac := fracByDate[date]
+		switch {
+		case frac >= 1.0:
+			return p.Success
+		case frac >= 0.66:
+			return p.Primary
+		case frac >= 0.33:
+			return p.ChartPrimary
+		default:
+			return p.Danger
+		}
+	}
+
+	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(p.Muted))
+	headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(p.Primary)).Bold(true)
+
+	title := headerStyle.Render(fmt.Sprintf("%s %d", month.String(), year))
+
+	weekdays := []string{"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"}
+	header := mutedStyle.Render(strings.Join(weekdays, "  "))
+
+	// startDow: weekday of first day of month (0=Sun).
+	startDow := int(firstOfMonth.Weekday())
+	var rows []string
+	var cells []string
+
+	// Blank leading cells.
+	for i := 0; i < startDow; i++ {
+		cells = append(cells, "  ")
+	}
+
+	today := now.Format("2006-01-02")
+	for day := 1; day <= daysInMonth; day++ {
+		date := fmt.Sprintf("%04d-%02d-%02d", year, int(month), day)
+		label := fmt.Sprintf("%2d", day)
+		style := lipgloss.NewStyle().Foreground(lipgloss.Color(cellColor(date)))
+		if date == today {
+			style = style.Bold(true).Underline(true)
+		}
+		cells = append(cells, style.Render(label))
+
+		if (startDow+day)%7 == 0 || day == daysInMonth {
+			// Pad last row.
+			for len(cells) < 7 {
+				cells = append(cells, "  ")
+			}
+			rows = append(rows, strings.Join(cells, "  "))
+			cells = nil
+		}
+	}
+
+	var out []string
+	out = append(out, title)
+	out = append(out, header)
+	for _, r := range rows {
+		out = append(out, r)
+	}
+	// Legend.
+	out = append(out, "")
+	legend := mutedStyle.Render("● ") +
+		lipgloss.NewStyle().Foreground(lipgloss.Color(p.Danger)).Render("low") + "  " +
+		lipgloss.NewStyle().Foreground(lipgloss.Color(p.ChartPrimary)).Render("partial") + "  " +
+		lipgloss.NewStyle().Foreground(lipgloss.Color(p.Primary)).Render("good") + "  " +
+		lipgloss.NewStyle().Foreground(lipgloss.Color(p.Success)).Render("all done")
+	out = append(out, legend)
 	return strings.Join(out, "\n")
 }
 

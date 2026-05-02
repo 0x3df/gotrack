@@ -350,6 +350,36 @@ func HasEntryForToday(entries []models.Entry) bool {
 	return false
 }
 
+// LoggingStreak returns the number of consecutive calendar days (ending today
+// or yesterday) on which any entry exists. Returns 0 if no recent entries.
+func LoggingStreak(entries []models.Entry) int {
+	if len(entries) == 0 {
+		return 0
+	}
+	dateSet := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		dateSet[e.Date] = true
+	}
+	today := time.Now()
+	anchor := today
+	// Allow the streak to start from yesterday if no entry today yet.
+	if !dateSet[today.Format("2006-01-02")] {
+		anchor = today.AddDate(0, 0, -1)
+		if !dateSet[anchor.Format("2006-01-02")] {
+			return 0
+		}
+	}
+	streak := 0
+	for {
+		if !dateSet[anchor.Format("2006-01-02")] {
+			break
+		}
+		streak++
+		anchor = anchor.AddDate(0, 0, -1)
+	}
+	return streak
+}
+
 // SumInRange totals a numeric tracker's values for all entries whose ISO
 // date falls in [start, end] inclusive.
 func SumInRange(entries []models.Entry, trackerID string, start, end time.Time) float64 {
@@ -629,4 +659,56 @@ func MomentumAccelerationRanking(entries []models.Entry, trackerIDs []string, wi
 		return rows[i].Delta > rows[j].Delta
 	})
 	return rows
+}
+
+// HabitChainResult describes how often trackerB was done on days when
+// trackerA was also done.
+type HabitChainResult struct {
+	AID, BID         string
+	ACount, BCount   int
+	CoCount          int
+	CoRate           float64 // fraction of A-days that also had B
+}
+
+// HabitChains returns the top N binary co-occurrence pairs, sorted by
+// co-occurrence rate (descending). Pairs are only included when both trackers
+// have at least minDays of data.
+func HabitChains(entries []models.Entry, trackerIDs []string, minDays, topN int) []HabitChainResult {
+	var results []HabitChainResult
+	n := len(trackerIDs)
+	for i := 0; i < n; i++ {
+		for j := 0; j < n; j++ {
+			if i == j {
+				continue
+			}
+			aCount, bCount, coCount := 0, 0, 0
+			for _, e := range entries {
+				av, aOK := e.Data[trackerIDs[i]].(bool)
+				bv, bOK := e.Data[trackerIDs[j]].(bool)
+				if aOK && av {
+					aCount++
+					if bOK && bv {
+						coCount++
+					}
+				}
+				if bOK && bv {
+					bCount++
+				}
+			}
+			if aCount < minDays || bCount < minDays {
+				continue
+			}
+			rate := float64(coCount) / float64(aCount)
+			results = append(results, HabitChainResult{
+				AID: trackerIDs[i], BID: trackerIDs[j],
+				ACount: aCount, BCount: bCount, CoCount: coCount,
+				CoRate: rate,
+			})
+		}
+	}
+	sort.Slice(results, func(i, j int) bool { return results[i].CoRate > results[j].CoRate })
+	if topN > 0 && len(results) > topN {
+		results = results[:topN]
+	}
+	return results
 }

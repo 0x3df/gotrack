@@ -23,14 +23,16 @@ type InsightsPayload struct {
 	} `json:"text,omitempty"`
 
 	Binary *struct {
-		Done           int     `json:"done"`
-		Total          int     `json:"total"`
-		ConsistencyPct float64 `json:"consistency_pct"`
-		CurrentStreak  int     `json:"current_streak"`
+		Done                 int        `json:"done"`
+		Total                int        `json:"total"`
+		ConsistencyPct       float64    `json:"consistency_pct"`
+		CurrentStreak        int        `json:"current_streak"`
+		WeekdayConsistency   [7]float64 `json:"weekday_consistency_pct"` // Sun=0..Sat=6
 	} `json:"binary,omitempty"`
 
 	Numeric *struct {
 		SeriesOldestFirst []float64 `json:"series_oldest_first"`
+		RollingAvg7d      []float64 `json:"rolling_avg_7d,omitempty"`
 		RecentAvg         *float64  `json:"recent_avg,omitempty"`
 		PrevAvg           *float64  `json:"prev_avg,omitempty"`
 		MomentumDelta     *float64  `json:"momentum_delta,omitempty"`
@@ -38,6 +40,7 @@ type InsightsPayload struct {
 		TargetHits        *int      `json:"target_hits,omitempty"`
 		TargetTotal       *int      `json:"target_total,omitempty"`
 		TargetPct         *float64  `json:"target_hit_pct,omitempty"`
+		TargetHitHistory  []bool    `json:"target_hit_history,omitempty"` // per-point hit vs target
 	} `json:"numeric,omitempty"`
 }
 
@@ -64,15 +67,17 @@ func buildInsights(cfg *models.Config, entries []models.Entry, trackerKey string
 	case models.TrackerBinary:
 		done, total := db.BinaryStats(entries, t.ID)
 		out.Binary = &struct {
-			Done           int     `json:"done"`
-			Total          int     `json:"total"`
-			ConsistencyPct float64 `json:"consistency_pct"`
-			CurrentStreak  int     `json:"current_streak"`
+			Done                 int        `json:"done"`
+			Total                int        `json:"total"`
+			ConsistencyPct       float64    `json:"consistency_pct"`
+			CurrentStreak        int        `json:"current_streak"`
+			WeekdayConsistency   [7]float64 `json:"weekday_consistency_pct"`
 		}{
-			Done:           done,
-			Total:          total,
-			ConsistencyPct: db.ConsistencyPct(entries, t.ID),
-			CurrentStreak:  db.CurrentStreak(entries, t.ID),
+			Done:               done,
+			Total:              total,
+			ConsistencyPct:     db.ConsistencyPct(entries, t.ID),
+			CurrentStreak:      db.CurrentStreak(entries, t.ID),
+			WeekdayConsistency: db.BinaryWeekdayConsistency(entries, t.ID),
 		}
 		return out, nil
 
@@ -81,6 +86,7 @@ func buildInsights(cfg *models.Config, entries []models.Entry, trackerKey string
 		if len(series) == 0 {
 			out.Numeric = &struct {
 				SeriesOldestFirst []float64 `json:"series_oldest_first"`
+				RollingAvg7d      []float64 `json:"rolling_avg_7d,omitempty"`
 				RecentAvg         *float64  `json:"recent_avg,omitempty"`
 				PrevAvg           *float64  `json:"prev_avg,omitempty"`
 				MomentumDelta     *float64  `json:"momentum_delta,omitempty"`
@@ -88,6 +94,7 @@ func buildInsights(cfg *models.Config, entries []models.Entry, trackerKey string
 				TargetHits        *int      `json:"target_hits,omitempty"`
 				TargetTotal       *int      `json:"target_total,omitempty"`
 				TargetPct         *float64  `json:"target_hit_pct,omitempty"`
+				TargetHitHistory  []bool    `json:"target_hit_history,omitempty"`
 			}{
 				SeriesOldestFirst: []float64{},
 				MomentumOK:        false,
@@ -102,6 +109,7 @@ func buildInsights(cfg *models.Config, entries []models.Entry, trackerKey string
 
 		nBlock := struct {
 			SeriesOldestFirst []float64 `json:"series_oldest_first"`
+			RollingAvg7d      []float64 `json:"rolling_avg_7d,omitempty"`
 			RecentAvg         *float64  `json:"recent_avg,omitempty"`
 			PrevAvg           *float64  `json:"prev_avg,omitempty"`
 			MomentumDelta     *float64  `json:"momentum_delta,omitempty"`
@@ -109,8 +117,13 @@ func buildInsights(cfg *models.Config, entries []models.Entry, trackerKey string
 			TargetHits        *int      `json:"target_hits,omitempty"`
 			TargetTotal       *int      `json:"target_total,omitempty"`
 			TargetPct         *float64  `json:"target_hit_pct,omitempty"`
+			TargetHitHistory  []bool    `json:"target_hit_history,omitempty"`
 		}{
 			SeriesOldestFirst: tailSeries,
+		}
+
+		if len(tailSeries) >= 7 {
+			nBlock.RollingAvg7d = db.RollingAverageSeries(tailSeries, 7)
 		}
 
 		if ra, pa, d, ok := db.TrackerMomentum(entries, t.ID, window); ok {
@@ -125,6 +138,12 @@ func buildInsights(cfg *models.Config, entries []models.Entry, trackerKey string
 			nBlock.TargetHits = &h
 			nBlock.TargetTotal = &tot
 			nBlock.TargetPct = &pct
+			// Per-point hit history (oldest-first, same order as series).
+			history := make([]bool, len(tailSeries))
+			for i, v := range tailSeries {
+				history[i] = v >= *t.Target
+			}
+			nBlock.TargetHitHistory = history
 		}
 
 		out.Numeric = &nBlock

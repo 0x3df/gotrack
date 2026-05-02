@@ -393,6 +393,19 @@ func renderLineChart(statsSeries, trendSeries []float64, t models.Tracker, cardW
 		lines = append(lines, "")
 		lines = append(lines, fmt.Sprintf("Trend (last %d days):", len(trendSeries)))
 		lines = append(lines, Sparkline(trendSeries, sparkColor))
+		if len(statsSeries) >= 7 {
+			rolling := db.RollingAverageSeries(statsSeries, 7)
+			if len(rolling) >= 2 {
+				first := rolling[0]
+				last := rolling[len(rolling)-1]
+				arrow, color := deltaArrow(last - first)
+				arrowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+				lines = append(lines, fmt.Sprintf("7d avg: %s %s %s",
+					formatAverageWithUnit(first, t),
+					arrowStyle.Render(arrow),
+					formatAverageWithUnit(last, t)))
+			}
+		}
 	}
 
 	if t.Target != nil {

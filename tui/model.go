@@ -37,6 +37,9 @@ const (
 	stateQuickValue                     // enter one tracker value
 	statePomodoroSetup                  // choose tracker and duration
 	statePomodoroActive                 // running pomodoro timer
+	stateFormDiscardConfirm             // "discard entry changes?" prompt
+	statePomodoroAbandonConfirm         // "abandon pomodoro?" prompt
+	stateReviewCustomRange              // enter custom from/to dates for review
 )
 
 type Model struct {
@@ -50,10 +53,15 @@ type Model struct {
 	setup *setupWiz
 
 	// Dashboard
-	activeTab         int
-	heroIndex         int
-	reviewMonthly     bool
-	dismissedReminder bool
+	activeTab            int
+	heroIndex            int
+	reviewMonthly        bool
+	reviewCustom         bool
+	reviewCustomStart    time.Time
+	reviewCustomEnd      time.Time
+	reviewCustomFromStr  string
+	reviewCustomToStr    string
+	dismissedReminder    bool
 	undoSnapshot      *models.Entry
 	undoHad           bool
 	config            *models.Config
@@ -69,6 +77,7 @@ type Model struct {
 	dateForm        *huh.Form
 	entryDate       string
 	deleteConfirmed *bool
+	discardConfirm  *bool
 
 	// Entry form
 	form        *huh.Form
@@ -89,6 +98,12 @@ type Model struct {
 	pomodoroStarted   time.Time
 	pomodoroDuration  time.Duration
 	pomodoroNow       time.Time
+
+	// Status / feedback
+	statusMsg string
+
+	// Confirm dialogs
+	abandonConfirm *bool
 }
 
 type keyMap struct {
@@ -109,6 +124,7 @@ type keyMap struct {
 	Edit     key.Binding
 	Quick    key.Binding
 	Pomodoro key.Binding
+	Export   key.Binding
 }
 
 var keys = keyMap{
@@ -128,6 +144,7 @@ var keys = keyMap{
 	Edit:     key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit recent entry")),
 	Quick:    key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "quick entry")),
 	Pomodoro: key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pomodoro")),
+	Export:   key.NewBinding(key.WithKeys("E"), key.WithHelp("E", "export JSON")),
 	Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 }
 
@@ -136,7 +153,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Left, k.Right, k.Up, k.Down, k.HeroPrev, k.HeroNext, k.Add, k.Quick, k.Pomodoro, k.Delete, k.Settings, k.Quit}}
+	return [][]key.Binding{{k.Left, k.Right, k.Up, k.Down, k.HeroPrev, k.HeroNext, k.Add, k.Quick, k.Pomodoro, k.Delete, k.Export, k.Settings, k.Quit}}
 }
 
 type pomodoroTickMsg time.Time
@@ -144,6 +161,14 @@ type pomodoroTickMsg time.Time
 func pomodoroTick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
 		return pomodoroTickMsg(t)
+	})
+}
+
+type statusClearMsg struct{}
+
+func statusClearTick() tea.Cmd {
+	return tea.Tick(4*time.Second, func(time.Time) tea.Msg {
+		return statusClearMsg{}
 	})
 }
 
@@ -204,16 +229,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pomodoroNow = time.Time(msg)
 			if !m.pomodoroStarted.IsZero() && m.pomodoroNow.Sub(m.pomodoroStarted) >= m.pomodoroDuration {
 				if err := m.completePomodoro(time.Now().Format("2006-01-02"), m.pomodoroStarted.Add(m.pomodoroDuration)); err != nil {
-					fmt.Fprintf(os.Stderr, "gotrack: failed to save pomodoro: %v\n", err)
+					m.statusMsg = fmt.Sprintf("Pomodoro save failed: %v", err)
 				}
 				m.state = stateDashboard
 				m.entries, _ = db.GetAllEntries()
 				m.triggerDashboardCelebration()
 				m.syncViewport()
-				if m.config != nil && m.config.App.Background.StarfieldEnabled {
-					return m, starfieldTick()
+				var cmds []tea.Cmd
+				if m.statusMsg != "" {
+					cmds = append(cmds, statusClearTick())
 				}
-				return m, nil
+				if m.config != nil && m.config.App.Background.StarfieldEnabled {
+					cmds = append(cmds, starfieldTick())
+				}
+				return m, tea.Batch(cmds...)
 			}
 			return m, pomodoroTick()
 		}
@@ -243,6 +272,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateSetup
 		m.setup = newAbortableSetupWiz(setupCanceledMsg{})
 		return m, m.setup.Init()
+	case statusClearMsg:
+		m.statusMsg = ""
+		return m, nil
 	}
 
 	switch m.state {
@@ -261,6 +293,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updatePomodoroSetup(msg)
 	case statePomodoroActive:
 		return m.updatePomodoroActive(msg)
+	case statePomodoroAbandonConfirm:
+		return m.updatePomodoroAbandonConfirm(msg)
 	case stateDeleteConfirm:
 		return m.updateDeleteConfirm(msg)
 	case stateHelp:
@@ -272,6 +306,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case stateForm:
 		return m.updateForm(msg)
+	case stateFormDiscardConfirm:
+		return m.updateFormDiscardConfirm(msg)
+	case stateReviewCustomRange:
+		return m.updateReviewCustomRange(msg)
 	case stateSettings:
 		cmd := m.settings.Update(msg)
 		return m, cmd
@@ -359,7 +397,17 @@ func (m Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case key.Matches(msg, keys.Review):
 			if m.activeTab == len(m.config.Categories)+2 {
-				m.reviewMonthly = !m.reviewMonthly
+				if !m.reviewMonthly && !m.reviewCustom {
+					m.reviewMonthly = true
+				} else if m.reviewMonthly && !m.reviewCustom {
+					m.reviewMonthly = false
+					m.reviewCustom = true
+					m.initReviewCustomForm()
+					m.state = stateReviewCustomRange
+					return m, nil
+				} else {
+					m.reviewCustom = false
+				}
 				m.syncViewport()
 				m.vp.GotoTop()
 			}
@@ -402,11 +450,36 @@ func (m Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.state = statePomodoroSetup
 			return m, m.dateForm.Init()
+		case key.Matches(msg, keys.Export):
+			if path, err := m.exportJSON(); err != nil {
+				m.statusMsg = fmt.Sprintf("Export failed: %v", err)
+			} else {
+				m.statusMsg = fmt.Sprintf("Exported → %s", path)
+			}
+			return m, statusClearTick()
 		}
 	}
 
 	m.vp, cmd = m.vp.Update(msg)
 	return m, cmd
+}
+
+func (m Model) exportJSON() (string, error) {
+	workspace, err := db.GetWorkspacePath()
+	if err != nil || workspace == "" {
+		workspace = os.TempDir()
+	}
+	filename := fmt.Sprintf("export_%s.json", time.Now().Format("2006-01-02"))
+	path := workspace + "/" + filename
+	f, err := os.Create(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	if err := db.ExportJSON(f); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func quickEntryTrackers(cfg *models.Config) []models.Tracker {
@@ -509,16 +582,20 @@ func (m Model) updateQuickEntry(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quickValue = value
 		}
 		if err := m.saveQuickEntry(time.Now().Format("2006-01-02")); err != nil {
-			fmt.Fprintf(os.Stderr, "gotrack: failed to save quick entry: %v\n", err)
+			m.statusMsg = fmt.Sprintf("Save failed: %v", err)
 		}
 		m.entries, _ = db.GetAllEntries()
 		m.triggerDashboardCelebration()
 		m.state = stateDashboard
 		m.syncViewport()
-		if m.config != nil && m.config.App.Background.StarfieldEnabled {
-			return m, starfieldTick()
+		var cmds []tea.Cmd
+		if m.statusMsg != "" {
+			cmds = append(cmds, statusClearTick())
 		}
-		return m, nil
+		if m.config != nil && m.config.App.Background.StarfieldEnabled {
+			cmds = append(cmds, starfieldTick())
+		}
+		return m, tea.Batch(cmds...)
 	}
 	if m.dateForm.State == huh.StateAborted {
 		m.state = stateDashboard
@@ -606,25 +683,60 @@ func (m Model) updatePomodoroActive(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch keyMsg.String() {
 		case "e", "enter", " ":
 			if err := m.completePomodoro(time.Now().Format("2006-01-02"), time.Now()); err != nil {
-				fmt.Fprintf(os.Stderr, "gotrack: failed to save pomodoro: %v\n", err)
+				m.statusMsg = fmt.Sprintf("Pomodoro save failed: %v", err)
 			}
 			m.entries, _ = db.GetAllEntries()
 			m.triggerDashboardCelebration()
 			m.state = stateDashboard
 			m.syncViewport()
-			if m.config != nil && m.config.App.Background.StarfieldEnabled {
-				return m, starfieldTick()
+			var cmds []tea.Cmd
+			if m.statusMsg != "" {
+				cmds = append(cmds, statusClearTick())
 			}
-			return m, nil
+			if m.config != nil && m.config.App.Background.StarfieldEnabled {
+				cmds = append(cmds, starfieldTick())
+			}
+			return m, tea.Batch(cmds...)
 		case "esc":
+			elapsed := time.Since(m.pomodoroStarted)
+			elapsedMin := int(elapsed.Minutes())
+			confirmed := false
+			m.abandonConfirm = &confirmed
+			desc := fmt.Sprintf("%d min elapsed — will not be logged.", elapsedMin)
+			m.dateForm = huh.NewForm(huh.NewGroup(
+				huh.NewConfirm().
+					Title("Abandon Pomodoro?").
+					Description(desc).
+					Value(m.abandonConfirm),
+			))
+			m.state = statePomodoroAbandonConfirm
+			return m, m.dateForm.Init()
+		}
+	}
+	return m, nil
+}
+
+func (m Model) updatePomodoroAbandonConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	form, cmd := m.dateForm.Update(msg)
+	if f, ok := form.(*huh.Form); ok {
+		m.dateForm = f
+	}
+	if m.dateForm.State == huh.StateCompleted {
+		if m.abandonConfirm != nil && *m.abandonConfirm {
 			m.state = stateDashboard
 			if m.config != nil && m.config.App.Background.StarfieldEnabled {
 				return m, starfieldTick()
 			}
 			return m, nil
 		}
+		m.state = statePomodoroActive
+		return m, pomodoroTick()
 	}
-	return m, nil
+	if m.dateForm.State == huh.StateAborted {
+		m.state = statePomodoroActive
+		return m, pomodoroTick()
+	}
+	return m, cmd
 }
 
 func (m Model) completePomodoro(date string, ended time.Time) error {
@@ -784,6 +896,67 @@ func (m *Model) initDeleteConfirm() {
 	))
 	// stash confirm pointer on the model via a per-state field
 	m.deleteConfirmed = &confirm
+}
+
+func (m *Model) initReviewCustomForm() {
+	today := time.Now()
+	start, _ := db.WeekBounds(today)
+	m.reviewCustomFromStr = start.Format("2006-01-02")
+	m.reviewCustomToStr = today.Format("2006-01-02")
+	m.dateForm = huh.NewForm(huh.NewGroup(
+		huh.NewInput().
+			Key("from").
+			Title("From date").
+			Placeholder("YYYY-MM-DD").
+			Value(&m.reviewCustomFromStr).
+			Validate(func(s string) error {
+				if strings.TrimSpace(s) == "" {
+					return fmt.Errorf("date required")
+				}
+				_, err := time.Parse("2006-01-02", strings.TrimSpace(s))
+				return err
+			}),
+		huh.NewInput().
+			Key("to").
+			Title("To date").
+			Placeholder("YYYY-MM-DD").
+			Value(&m.reviewCustomToStr).
+			Validate(func(s string) error {
+				if strings.TrimSpace(s) == "" {
+					return fmt.Errorf("date required")
+				}
+				_, err := time.Parse("2006-01-02", strings.TrimSpace(s))
+				return err
+			}),
+	))
+}
+
+func (m *Model) updateReviewCustomRange(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
+		m.reviewCustom = false
+		m.state = stateDashboard
+		m.syncViewport()
+		return m, nil
+	}
+	form, cmd := m.dateForm.Update(msg)
+	if f, ok := form.(*huh.Form); ok {
+		m.dateForm = f
+	}
+	if m.dateForm.State == huh.StateCompleted {
+		from, err1 := time.Parse("2006-01-02", strings.TrimSpace(m.reviewCustomFromStr))
+		to, err2 := time.Parse("2006-01-02", strings.TrimSpace(m.reviewCustomToStr))
+		if err1 != nil || err2 != nil || !from.Before(to.Add(24*time.Hour)) {
+			m.reviewCustom = false
+		} else {
+			m.reviewCustomStart = from
+			m.reviewCustomEnd = to.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+		}
+		m.state = stateDashboard
+		m.syncViewport()
+		m.vp.GotoTop()
+		return m, nil
+	}
+	return m, cmd
 }
 
 func (m *Model) updateDateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -998,8 +1171,16 @@ func (m *Model) catHasData(entry *models.Entry, cat models.Category) bool {
 
 func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
-		m.state = stateDashboard
-		return m, nil
+		confirmed := false
+		m.discardConfirm = &confirmed
+		m.dateForm = huh.NewForm(huh.NewGroup(
+			huh.NewConfirm().
+				Title("Discard changes?").
+				Description("Unsaved entry data will be lost.").
+				Value(m.discardConfirm),
+		))
+		m.state = stateFormDiscardConfirm
+		return m, m.dateForm.Init()
 	}
 	form, cmd := m.form.Update(msg)
 	if f, ok := form.(*huh.Form); ok {
@@ -1011,16 +1192,47 @@ func (m Model) updateForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.entries, _ = db.GetAllEntries()
 		m.triggerDashboardCelebration()
 		m.syncViewport()
-		if m.config != nil && m.config.App.Background.StarfieldEnabled {
-			return m, starfieldTick()
+		var cmds []tea.Cmd
+		if m.statusMsg != "" {
+			cmds = append(cmds, statusClearTick())
 		}
-		return m, nil
+		if m.config != nil && m.config.App.Background.StarfieldEnabled {
+			cmds = append(cmds, starfieldTick())
+		}
+		return m, tea.Batch(cmds...)
 	}
 	if m.form.State == huh.StateAborted {
 		m.state = stateDashboard
 		if m.config != nil && m.config.App.Background.StarfieldEnabled {
 			return m, starfieldTick()
 		}
+		return m, nil
+	}
+	return m, cmd
+}
+
+func (m Model) updateFormDiscardConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.Type == tea.KeyEsc {
+		m.state = stateForm
+		return m, nil
+	}
+	form, cmd := m.dateForm.Update(msg)
+	if f, ok := form.(*huh.Form); ok {
+		m.dateForm = f
+	}
+	if m.dateForm.State == huh.StateCompleted {
+		if m.discardConfirm != nil && *m.discardConfirm {
+			m.state = stateDashboard
+			if m.config != nil && m.config.App.Background.StarfieldEnabled {
+				return m, starfieldTick()
+			}
+			return m, nil
+		}
+		m.state = stateForm
+		return m, nil
+	}
+	if m.dateForm.State == huh.StateAborted {
+		m.state = stateForm
 		return m, nil
 	}
 	return m, cmd
@@ -1073,11 +1285,11 @@ func (m *Model) saveEntry() {
 		Data: data,
 	}
 	if err := db.UpsertEntry(entry); err != nil {
-		fmt.Fprintf(os.Stderr, "gotrack: failed to save entry: %v\n", err)
+		m.statusMsg = fmt.Sprintf("Save failed: %v", err)
 		return
 	}
 	if err := integrations.ExportObsidianEntry(m.config, entry); err != nil {
-		fmt.Fprintf(os.Stderr, "gotrack: failed to export obsidian note: %v\n", err)
+		m.statusMsg = fmt.Sprintf("Obsidian export failed: %v", err)
 	}
 }
 
@@ -1090,7 +1302,7 @@ func (m Model) View() string {
 	case stateSetup:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			m.setup.View())
-	case stateEntryDate, stateDeleteDate, stateDeleteConfirm, stateEditPick, stateQuickPick, stateQuickValue, statePomodoroSetup:
+	case stateEntryDate, stateDeleteDate, stateDeleteConfirm, stateEditPick, stateQuickPick, stateQuickValue, statePomodoroSetup, stateFormDiscardConfirm, statePomodoroAbandonConfirm, stateReviewCustomRange:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			m.dateForm.View())
 	case statePomodoroActive:
@@ -1292,11 +1504,22 @@ func (m Model) dashboardView() string {
 				time.Now().Format("2006-01-02")))
 	}
 
+	var statusBar string
+	if m.statusMsg != "" {
+		statusBar = lipgloss.NewStyle().
+			Foreground(lipgloss.Color(p.Danger)).Bold(true).
+			Align(lipgloss.Center).Width(layout.ContentWidth).
+			Render("⚠ " + m.statusMsg)
+	}
+
 	parts := []string{titleStyle.Render(bannerForWidth(layout.ContentWidth))}
 	if banner != "" {
 		parts = append(parts, banner)
 	}
 	parts = append(parts, tabBar, m.vp.View(), helpView)
+	if statusBar != "" {
+		parts = append(parts, statusBar)
+	}
 	content := lipgloss.JoinVertical(lipgloss.Center, parts...)
 
 	return lipgloss.NewStyle().
@@ -1332,6 +1555,7 @@ func (m Model) viewOverview() string {
 		renderCard("Momentum", accent, m.overviewMomentum(), layout.CardWidth, layout.CardHeight),
 		renderCard("Streaks", accent, m.overviewStreaks(), layout.CardWidth, layout.CardHeight),
 		renderCard("Personal Bests", accent, m.overviewPersonalBest(), layout.CardWidth, layout.CardHeight),
+		renderCard("Time Allocation (7d)", accent, m.overviewTimeAllocation(), layout.CardWidth, layout.CardHeight),
 	)
 	for _, cat := range m.config.Categories {
 		content := m.categorySummary(cat)
@@ -1553,10 +1777,47 @@ func (m Model) overviewSnapshot() string {
 		status = "Missing"
 	}
 
+	var nudge string
+	if daysSince := db.DaysSinceLastEntry(m.entries); daysSince > 1 {
+		nudge = fmt.Sprintf("\n⚠ Last logged %d days ago", daysSince)
+	}
+
 	return fmt.Sprintf(
-		"Today (%s): %s\nLatest entry: %s\nCoverage (latest): %.0f%% (%d/%d)\nActive streaks: %d\nTargets hit: %d/%d (last 30 logged)",
-		today, status, latest.Date, coverage, recorded, totalTrackers, activeStreaks, targetHits, targetTotal,
+		"Today (%s): %s\nLatest entry: %s\nCoverage (latest): %.0f%% (%d/%d)\nActive streaks: %d\nTargets hit: %d/%d (last 30 logged)%s",
+		today, status, latest.Date, coverage, recorded, totalTrackers, activeStreaks, targetHits, targetTotal, nudge,
 	)
+}
+
+func (m Model) overviewTimeAllocation() string {
+	p := palette()
+	now := time.Now()
+	start := now.AddDate(0, 0, -6)
+
+	type catMinutes struct {
+		name    string
+		minutes float64
+	}
+	var rows []catMinutes
+	for _, cat := range m.config.Categories {
+		mins := db.SumCategoryMinutesInRange(m.entries, m.config, []string{cat.Name}, start, now)
+		if mins > 0 {
+			rows = append(rows, catMinutes{cat.Name, mins})
+		}
+	}
+	if len(rows) == 0 {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(p.Muted)).Render("No duration data in last 7 days.")
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].minutes > rows[j].minutes })
+	maxMins := rows[0].minutes
+	barWidth := 16
+	var lines []string
+	for _, r := range rows {
+		frac := r.minutes / maxMins
+		filled := int(frac * float64(barWidth))
+		bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+		lines = append(lines, fmt.Sprintf("%-14s %s %dm", truncate(r.name, 14), bar, int(r.minutes)))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) overviewMomentum() string {
@@ -1722,6 +1983,13 @@ func findBinaryTrue(entry *models.Entry, cfg *models.Config, categoryNames []str
 
 func (m Model) overviewStreaks() string {
 	p := palette()
+
+	var header string
+	if logStreak := db.LoggingStreak(m.entries); logStreak > 1 {
+		header = lipgloss.NewStyle().Foreground(lipgloss.Color(p.Success)).Bold(true).
+			Render(fmt.Sprintf("Logged %d days straight\n\n", logStreak))
+	}
+
 	type row struct {
 		name          string
 		current, best int
@@ -1741,7 +2009,11 @@ func (m Model) overviewStreaks() string {
 		}
 	}
 	if len(rows) == 0 {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(p.Muted)).Render("Log a binary tracker to start a streak.")
+		base := lipgloss.NewStyle().Foreground(lipgloss.Color(p.Muted)).Render("Log a binary tracker to start a streak.")
+		if header != "" {
+			return header + base
+		}
+		return base
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].current > rows[j].current })
 	if len(rows) > 4 {
@@ -1775,7 +2047,11 @@ func (m Model) overviewStreaks() string {
 		}
 		out = append(out, line)
 	}
-	return strings.Join(out, "\n")
+	body := strings.Join(out, "\n")
+	if header != "" {
+		return header + body
+	}
+	return body
 }
 
 func (m Model) overviewLastWeek() string {
@@ -1934,6 +2210,114 @@ func (m *Model) triggerDashboardCelebration() {
 	}
 }
 
+// insightHabitChains shows co-occurrence rates for binary tracker pairs —
+// "When you do X, you do Y Z% of the time."
+func (m Model) insightHabitChains(binaryTrackers []models.Tracker) string {
+	p := palette()
+	if len(binaryTrackers) < 2 {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(p.Muted)).Render("Need 2+ binary trackers.")
+	}
+	ids := make([]string, len(binaryTrackers))
+	nameByID := make(map[string]string, len(binaryTrackers))
+	for i, t := range binaryTrackers {
+		ids[i] = t.ID
+		nameByID[t.ID] = t.Name
+	}
+	chains := db.HabitChains(m.entries, ids, 5, 5)
+	if len(chains) == 0 {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(p.Muted)).Render("Not enough binary data yet (need 5+ days per tracker).")
+	}
+	var lines []string
+	for _, c := range chains {
+		pct := c.CoRate * 100
+		color := p.Muted
+		switch {
+		case pct >= 80:
+			color = p.Success
+		case pct >= 50:
+			color = p.Primary
+		case pct >= 25:
+			color = p.ChartPrimary
+		}
+		style := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+		lines = append(lines, fmt.Sprintf("%-16s → %-16s\n  %s  %.0f%% of the time (%d/%d days)",
+			truncate(nameByID[c.AID], 16),
+			truncate(nameByID[c.BID], 16),
+			style.Render("●"),
+			pct, c.CoCount, c.ACount))
+	}
+	return strings.Join(lines, "\n\n")
+}
+
+// insightCorrelationMatrix lists the top 5 strongest numeric-tracker pairs by
+// |r| with a brief strength label.
+func (m Model) insightCorrelationMatrix(numericTrackers []models.Tracker) string {
+	p := palette()
+	if len(numericTrackers) < 2 {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(p.Muted)).Render("Need 2+ numeric trackers.")
+	}
+	type corrPair struct {
+		a, b string
+		r    float64
+	}
+	var pairs []corrPair
+	for i := 0; i < len(numericTrackers); i++ {
+		for j := i + 1; j < len(numericTrackers); j++ {
+			var xs, ys []float64
+			for _, e := range m.entries {
+				xv, okX := e.Data[numericTrackers[i].ID].(float64)
+				yv, okY := e.Data[numericTrackers[j].ID].(float64)
+				if okX && okY {
+					xs = append(xs, xv)
+					ys = append(ys, yv)
+				}
+			}
+			if len(xs) < 5 {
+				continue
+			}
+			r, ok := db.PearsonCorrelation(xs, ys)
+			if !ok {
+				continue
+			}
+			pairs = append(pairs, corrPair{truncate(numericTrackers[i].Name, 14), truncate(numericTrackers[j].Name, 14), r})
+		}
+	}
+	if len(pairs) == 0 {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(p.Muted)).Render("Not enough overlapping data yet.")
+	}
+	sort.Slice(pairs, func(i, j int) bool { return mathAbs(pairs[i].r) > mathAbs(pairs[j].r) })
+	if len(pairs) > 5 {
+		pairs = pairs[:5]
+	}
+	strengthLabel := func(r float64) string {
+		abs := mathAbs(r)
+		switch {
+		case abs >= 0.7:
+			return "strong"
+		case abs >= 0.4:
+			return "moderate"
+		default:
+			return "weak"
+		}
+	}
+	var lines []string
+	for _, cp := range pairs {
+		sign := "+"
+		color := p.Success
+		if cp.r < 0 {
+			sign = "−"
+			color = p.Danger
+		}
+		style := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+		lines = append(lines, fmt.Sprintf("%s × %s\n  %s  r=%s%.2f (%s)",
+			cp.a, cp.b,
+			style.Render("●"),
+			sign, mathAbs(cp.r),
+			strengthLabel(cp.r)))
+	}
+	return strings.Join(lines, "\n\n")
+}
+
 // ─── Insights Tab ─────────────────────────────────────────────────────────────
 
 func (m Model) viewInsights() string {
@@ -1959,12 +2343,16 @@ func (m Model) viewInsights() string {
 	compStr := m.insightStrongestABImpact(binaryTrackers, numericTrackers)
 	weekdayStr := m.insightBestWeekday()
 	momentumStr := m.insightMomentumLeaders()
+	corrMatrixStr := m.insightCorrelationMatrix(numericTrackers)
+	habitChainStr := m.insightHabitChains(binaryTrackers)
 
 	return renderCardGrid([]string{
 		renderCard("A/B Impact", palette().Primary, compStr, layout.CardWidth, layout.CardHeight),
 		renderCard("Strongest Correlation", palette().Primary, scatterStr, layout.CardWidth, layout.CardHeight),
 		renderCard("Best Day of Week", palette().Primary, weekdayStr, layout.CardWidth, layout.CardHeight),
 		renderCard("Momentum Leaders/Laggers", palette().Primary, momentumStr, layout.CardWidth, layout.CardHeight),
+		renderCard("Correlation Matrix (top 5)", palette().Primary, corrMatrixStr, layout.CardWidth, layout.CardHeight),
+		renderCard("Habit Chains", palette().Primary, habitChainStr, layout.CardWidth, layout.CardHeight),
 	}, m.width)
 }
 

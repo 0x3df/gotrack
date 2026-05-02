@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/huh"
 )
 
-func TestUpdateForm_EscReturnsToDashboard(t *testing.T) {
+func TestUpdateForm_EscOpensDiscardConfirm(t *testing.T) {
 	m := Model{
 		state: stateForm,
 		form: huh.NewForm(
@@ -19,8 +19,8 @@ func TestUpdateForm_EscReturnsToDashboard(t *testing.T) {
 
 	nextModel, _ := m.updateForm(tea.KeyMsg{Type: tea.KeyEsc})
 	next := modelState(nextModel)
-	if next.state != stateDashboard {
-		t.Fatalf("state after esc = %v, want %v", next.state, stateDashboard)
+	if next.state != stateFormDiscardConfirm {
+		t.Fatalf("state after esc = %v, want %v", next.state, stateFormDiscardConfirm)
 	}
 }
 
