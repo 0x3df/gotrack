@@ -24,8 +24,8 @@ type heroVisual struct {
 // heroVisuals lists the cycleable big-container visualizations. Order here
 // is the cycle order — the first one is what new users see first.
 var heroVisuals = []heroVisual{
-	{"pulse", "Yearly Pulse", renderHeroYearPulse},
 	{"wall", "Tracker Wall (last 4 weeks)", renderHeroTrackerWall},
+	{"pulse", "Yearly Pulse", renderHeroYearPulse},
 	{"rhythm", "Weekday Rhythm", renderHeroWeekdayRhythm},
 	{"podium", "Momentum Podium", renderHeroMomentumPodium},
 	{"month", "Month at a Glance", renderHeroMonthCalendar},

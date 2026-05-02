@@ -35,8 +35,8 @@ GoTrack provides several ways to see your data:
 
 ### Overview Tab
 - **Hero Visuals**: Large charts at the top. Cycle through them with `[` and `]`.
-- **Yearly Pulse**: A heatmap of your overall consistency over the year.
 - **Tracker Wall**: A grid of all your binary trackers for the last 30 days.
+- **Yearly Pulse**: A heatmap of your overall consistency over the year.
 - **Cards**: Summaries of each category, showing streaks and averages.
 
 ### Category Tabs

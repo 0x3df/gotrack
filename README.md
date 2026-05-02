@@ -63,7 +63,7 @@ GoTrack is designed for speed. Most actions are a single keypress away:
 ### Navigation
 - `h` / `l` or `←` / `→`: Switch between dashboard tabs (Overview, Categories, Insights, Review)
 - `j` / `k` or `↓` / `↑`: Scroll through visualizations
-- `[` / `]`: Cycle between Overview hero visuals (Yearly Pulse, Tracker Wall, etc.)
+- `[` / `]`: Cycle between Overview hero visuals (Tracker Wall, Yearly Pulse, etc.)
 - `?`: Open the help popup with all keybinds
 
 ### Entry & Editing
