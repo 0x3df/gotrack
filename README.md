@@ -49,44 +49,65 @@ go build -o gotrack .
 ./gotrack
 ```
 
-## First Launch
+## Quick Start
 
-On first launch, GoTrack walks you through a setup wizard so you can:
-
-1. Choose a data directory for your workspace, config, and database.
-2. Pick a setup mode: guided defaults or custom from scratch.
-3. Define the categories and trackers you want on the dashboard.
+1.  **Install:** `go install github.com/0x3df/gotrack@latest`
+2.  **Initialize:** Run `gotrack` and follow the guided setup.
+3.  **Track:** Press `a` to log your first entry or `x` for a quick entry.
+4.  **Visualize:** Use `h`/`l` to browse your dashboard and see trends emerge.
 
 ## Controls
 
-- `a`: add or edit an entry for any date
-- `x`: quick entry for one tracker value today
-- `p`: start a pomodoro and allocate elapsed minutes to a duration tracker
-- `d`: delete the entry for a given date
-- `esc`: cancel date/entry form and return to dashboard
-- `s`: open settings and tracking setup
-- `s` settings also manages theme, Obsidian export, and starfield background
-- `h` / `l` or `←` / `→`: switch tabs
-- `j` / `k` or `↓` / `↑`: scroll visualizations
-- `[` / `]`: cycle between overview hero visuals (Yearly Pulse, Tracker Wall, Weekday Rhythm, Momentum Podium)
-- `?`: open the keybinds popup window
-- `q`: quit
+GoTrack is designed for speed. Most actions are a single keypress away:
 
-Date prompts accept shortcuts: `t` / `today`, `y` / `yesterday`, or `-N` (e.g. `-3` for three days ago).
+### Navigation
+- `h` / `l` or `←` / `→`: Switch between dashboard tabs (Overview, Categories, Insights, Review)
+- `j` / `k` or `↓` / `↑`: Scroll through visualizations
+- `[` / `]`: Cycle between Overview hero visuals (Yearly Pulse, Tracker Wall, etc.)
+- `?`: Open the help popup with all keybinds
 
-### Logging from your phone
+### Entry & Editing
+- `a`: **Add or edit** an entry for any date (supports shortcuts like `t`, `y`, `-3`)
+- `x`: **Quick entry** for a single tracker today
+- `p`: Start a **Pomodoro** timer to log focused work automatically
+- `e`: **Edit** one of your 20 most recent entries
+- `u`: **Undo** the last save (if you made a mistake)
+- `d`: **Delete** an entry for a specific date
 
-You can log from iOS or another machine using the `gotrack log` CLI together with a sync tool (Syncthing / iCloud) or an SSH-based iOS Shortcut. See [docs/REMOTE_LOGGING.md](docs/REMOTE_LOGGING.md) for setup recipes.
+### Settings & Data
+- `s`: Open **Settings** to manage trackers, themes, and integrations
+- `E`: **Export** all data to a JSON file in your workspace
+- `q`: **Quit** safely (triggers backup if configured)
 
-## Data Persistence
+## Power User Features
 
-- GoTrack stores your database and config in the workspace you chose on first launch.
-- Rebuilding or replacing the `gotrack` binary does not delete this workspace or wipe your data.
+### CLI Logging
+Log data without even opening the TUI. Perfect for scripts, shortcuts, or terminal-heavy workflows:
+```bash
+gotrack log code=true sleep=7.5
+gotrack log rating=4 --date yesterday
+gotrack log "Deep Work=90" "Main Win=shipped feature"
+```
 
-## FAQ
+### Obsidian Integration
+Mirror your daily entries into your Obsidian vault as Markdown notes. Each entry gets its own file, and you can even generate a **weekly summary report**:
+```bash
+gotrack report
+```
 
-Common questions, troubleshooting, and Review-tab behavior: **[docs/FAQ.md](docs/FAQ.md)**.  
-AI assistants (MCP): **[docs/AI_AGENTS.md](docs/AI_AGENTS.md)**.
+### AI Context (MCP)
+Expose your tracking data to AI assistants like Cursor or Claude Desktop using the Model Context Protocol:
+```bash
+gotrack mcp
+```
+See [docs/AI_AGENTS.md](docs/AI_AGENTS.md) for setup.
+
+## Documentation
+
+- **[Detailed Usage Guide](docs/USAGE.md)**: Deep dive into Pomodoro, Quick Entry, and more.
+- **[Customization Guide](docs/CUSTOMIZATION.md)**: How to structure your trackers and categories.
+- **[FAQ](docs/FAQ.md)**: Troubleshooting and common questions.
+- **[Remote Logging](docs/REMOTE_LOGGING.md)**: Logging from your phone or other devices.
 
 ## Stack
 

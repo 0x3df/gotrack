@@ -18,63 +18,64 @@ In settings (`s`), find the Obsidian section. Enter your vault path and optional
 
 ### Controls and navigation
 
-**What are all the keyboard shortcuts?**
+**What are the key keyboard shortcuts?**
+- `a`: Add/edit full entry
+- `x`: Quick entry (one tracker only)
+- `p`: Pomodoro timer (logs to a duration tracker)
+- `e`: Edit recent entries
+- `u`: Undo last save
+- `d`: Delete entry
+- `s`: Settings & Setup
+- `?`: Toggle help overlay
+- `h`/`l`: Switch tabs
+- `j`/`k`: Scroll view
+- `q`: Quit
 
-- `a`: add/edit entry
-- `x`: quick entry for one tracker value today
-- `p`: pomodoro timer for a duration tracker
-- `d`: delete entry
-- `s`: settings
-- `esc`: cancel/back
-- `h`/`l` or `←`/`→`: switch tabs
-- `j`/`k` or `↓`/`↑`: scroll
-- `?`: open the keybinds popup window
-- `q`: quit
+**How do I use the date shortcuts?**
+When prompted for a date, you can use:
+- `t` or `today`
+- `y` or `yesterday`
+- `-N` (e.g., `-2` for two days ago, `-7` for a week ago)
+- `MM-DD` (e.g., `05-01` for May 1st)
+- `YYYY-MM-DD` (e.g., `2026-05-01`)
 
-**How do I navigate between views?**  
-Use `h`/`l` or the arrow keys to switch between dashboard tabs (overview, trends, correlations).
+**What is the difference between "Add Entry" (`a`) and "Quick Entry" (`x`)?**
+- **Add Entry (`a`)**: Opens a full form for the chosen date, showing all trackers in their respective categories. Best for your end-of-day reflection.
+- **Quick Entry (`x`)**: A streamlined flow to log a single value for *today* only. Use this for "fire and forget" tracking throughout the day (e.g., logging a cup of coffee or a quick workout).
 
-**How do I see keybinds inside the app?**  
-Press `?` from the dashboard to open the keybinds popup window. Press `?`, `esc`, or `q` to close it.
+**How does the Pomodoro timer work?**
+Press `p` to start a session. You'll pick a duration tracker (e.g., "Deep Work" or "Coding") and a time (default 25m). While active, GoTrack shows a countdown. When finished (or if you stop early with `enter`), the elapsed time is automatically added to that tracker for today.
 
-### Visual customization
+### Visuals and Insights
 
-**How do I change themes?**  
-Open settings (`s`) and navigate to the theme section. Choose between GoTrack (default), Catppuccin, Nord, or Accessible.
+**What do the different symbols in heatmaps mean?**
+- `■` (or `#`): Activity recorded/Goal met
+- `·` (or `.`): No activity recorded
+- `▪` (or `o`): Partial progress (for numeric trackers)
 
-**What is the starfield mode?**  
-The starfield is an ambient animated background for the dashboard. Toggle it on/off in settings (`s` → appearance).
+**How are correlations calculated in the Insights tab?**
+GoTrack calculates the **Pearson Correlation Coefficient (r)** between pairs of numeric trackers. 
+- `r = +1.0`: Strong positive correlation (as X goes up, Y goes up)
+- `r = -1.0`: Strong negative correlation (as X goes up, Y goes down)
+- `r = 0.0`: No linear correlation
+It also shows a scatter plot to help you visualize the relationship.
 
-### Reading the Review tab
+**What is the "Biggest Mover" in the Review tab?**
+This identifies the tracker with the largest absolute percentage change compared to the previous period (week or month). It's a great way to spot sudden shifts in your habits.
 
-**Why does the Review card show huge negative deltas mid-week?**  
-The Review tab compares the *current calendar week* against the *previous calendar week*. On Tuesday the current week only has 2 days of data while the previous week has 7, so any cumulative tracker (minutes, counts) will show a large ▼ arrow — you're comparing 2 days of sums to 7 days of sums. This is expected. The delta becomes meaningful only on Sunday when both weeks are full, or on the Monthly toggle (`w`) once a month completes.
+### Settings and Data
 
-**Why does Weight show "178.4 lb" instead of my latest reading?**  
-Numeric (measurement-type) trackers show the week's **average**, not the sum or the latest value. This makes weight, resting heart rate, etc. comparable across weeks even when you skip days. Duration and Count trackers still show the total — those *are* cumulative by nature.
+**Where is my config file?**
+GoTrack stores everything in your workspace directory (chosen during setup). The default is usually `~/.gotrack`. Look for `config.json` and `data.db`.
 
-**Why do I see "Chinese · CI / Input" and "Japanese · CI / Input" as separate rows?**  
-When two trackers share a name across different categories, GoTrack prefixes the category so you can tell them apart. Categories roll up independently, so the Power pack's per-language CI / Input minutes are tracked separately.
+**Can I change the colors?**
+Yes! Go to Settings (`s`) -> Appearance to choose a theme (GoTrack, Catppuccin, Nord, etc.). You can also enable/disable the "Starfield" background animation.
 
-**Why do some trackers not appear in Review?**  
-Text trackers (notes, wins, blockers) aren't aggregated — they're only visible on the Overview / entry form. Rating trackers also skip the numeric card. A numeric tracker also won't appear if it has zero data in both the current and previous period.
+**How do I back up my data?**
+GoTrack supports a "Backup Command" that runs every time you save. See the **Backup Recipes** section below for examples using Git, rclone, or Syncthing.
 
-**Why does the Biggest Mover card sometimes name something surprising?**  
-"Biggest mover" is sorted by absolute delta across *all* numeric trackers, so a tracker you just started logging this week will always look like a huge mover vs the prior zero. The effect disappears once you have 2+ weeks of data for that tracker.
-
-### Data and storage
-
-**Where is my data stored?**  
-Your data lives in the workspace directory you chose during first launch (default under your home directory). It contains:
-
-- `data.db` — SQLite database with all entries
-- `config.json` — your configuration
-
-**How do I backup or restore?**  
-Copy the workspace directory, or use `gotrack export --format json` and `gotrack import`. To restore from a folder, point GoTrack at that directory on next launch (or replace the workspace path in `~/.gotrack_workspace`).
-
-**How do I set up automatic backups?**  
-GoTrack can run a shell command after every save. Set it in Settings → App → "Backup command", or during first-launch setup. The command runs in the background and its output is discarded. See examples below.
+**Does GoTrack support multiple workspaces?**
+Currently, GoTrack uses a single workspace defined in `~/.gotrack_workspace`. You can manually edit this file to point to a different directory if needed.
 
 ---
 
