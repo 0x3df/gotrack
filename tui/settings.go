@@ -80,6 +80,7 @@ func newSettingsWiz(cfg *models.Config, entries []models.Entry) *settingsWiz {
 			ObsidianFolder:   cfg.App.Obsidian.DailyFolder,
 			StarfieldEnabled: cfg.App.Background.StarfieldEnabled,
 			BackupCmd:        cfg.App.BackupCmd,
+			SyncCmd:          cfg.App.SyncCmd,
 		},
 	}
 	w.buildForm()
@@ -403,8 +404,12 @@ func (w *settingsWiz) buildForm() {
 				Value(&w.appSettings.StarfieldEnabled),
 			huh.NewInput().
 				Title("Backup command (optional)").
-				Description("Shell command run after every save. e.g. git -C ~/.gotrack add -A && git -C ~/.gotrack commit -m 'backup'").
+				Description("Shell command run after every save and on app close. e.g. git -C ~/.gotrack add -A && git -C ~/.gotrack commit -m 'backup' && git -C ~/.gotrack push").
 				Value(&w.appSettings.BackupCmd),
+			huh.NewInput().
+				Title("Sync command (optional)").
+				Description("Shell command run on app open. e.g. git -C ~/.gotrack pull").
+				Value(&w.appSettings.SyncCmd),
 			huh.NewSelect[string]().
 				Title("Action").
 				Options(
@@ -524,6 +529,7 @@ func (w *settingsWiz) advance() tea.Cmd {
 			w.workspace, _ = db.GetWorkspacePath()
 			w.pointerPath, _ = db.GetPointerFilePath()
 			w.notice = "App settings saved."
+			db.LogEvent("config_saved", "app settings")
 			runBackupCmd(w.config)
 		}
 		w.phase = settingsPhaseMenu

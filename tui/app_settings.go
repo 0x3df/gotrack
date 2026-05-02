@@ -14,6 +14,7 @@ type appSettingsDraft struct {
 	ObsidianFolder   string
 	StarfieldEnabled bool
 	BackupCmd        string
+	SyncCmd          string
 }
 
 func applyAppSettings(cfg *models.Config, draft appSettingsDraft) error {
@@ -35,6 +36,7 @@ func applyAppSettings(cfg *models.Config, draft appSettingsDraft) error {
 	cfg.App.Obsidian.DailyFolder = draft.ObsidianFolder
 	cfg.App.Background.StarfieldEnabled = draft.StarfieldEnabled
 	cfg.App.BackupCmd = strings.TrimSpace(draft.BackupCmd)
+	cfg.App.SyncCmd = strings.TrimSpace(draft.SyncCmd)
 	models.NormalizeAppSettings(&cfg.App)
 	return nil
 }

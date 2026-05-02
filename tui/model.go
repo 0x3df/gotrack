@@ -186,6 +186,7 @@ func InitialModel(cfg *models.Config) Model {
 		m.state = stateDashboard
 		m.config = cfg
 		m.entries, _ = db.GetAllEntries()
+		db.LogEvent("app_open", fmt.Sprintf("entries=%d", len(m.entries)))
 	}
 	return m
 }
@@ -194,16 +195,23 @@ func (m Model) Init() tea.Cmd {
 	if m.state == stateSetup {
 		return m.setup.Init()
 	}
+	var cmds []tea.Cmd
 	if m.config != nil && m.config.App.Background.StarfieldEnabled {
-		return starfieldTick()
+		cmds = append(cmds, starfieldTick())
 	}
-	return nil
+	if syncCmd := runSyncCmd(m.config); syncCmd != nil {
+		m.statusMsg = "Syncing…"
+		cmds = append(cmds, syncCmd)
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
+			db.LogEvent("app_close", fmt.Sprintf("entries=%d", len(m.entries)))
+			runBackupCmdSync(m.config)
 			return m, tea.Quit
 		}
 	case tea.WindowSizeMsg:
@@ -276,6 +284,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusClearMsg:
 		m.statusMsg = ""
 		return m, nil
+	case syncDoneMsg:
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("Sync failed: %v", msg.err)
+		} else {
+			m.statusMsg = "Sync complete"
+		}
+		m.entries, _ = db.GetAllEntries()
+		m.syncViewport()
+		return m, statusClearTick()
 	}
 
 	switch m.state {
@@ -345,6 +362,8 @@ func (m Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, keys.Quit):
+			db.LogEvent("app_close", fmt.Sprintf("entries=%d", len(m.entries)))
+			runBackupCmdSync(m.config)
 			return m, tea.Quit
 		case key.Matches(msg, keys.Add):
 			m.state = stateEntryDate
@@ -627,8 +646,10 @@ func (m Model) updateQuickEntry(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) saveQuickEntry(date string) error {
 	if err := db.UpsertEntryLog(m.config, date, map[string]interface{}{m.quickTrackerID: m.quickValue}); err != nil {
+		db.LogEvent("quick_entry_failed", fmt.Sprintf("date=%s tracker=%s err=%v", date, m.quickTrackerID, err))
 		return err
 	}
+	db.LogEvent("quick_entry_saved", fmt.Sprintf("date=%s tracker=%s value=%s", date, m.quickTrackerID, m.quickValue))
 	entry, err := db.GetEntryForDate(date)
 	if err != nil {
 		return err
@@ -694,6 +715,7 @@ func (m Model) updatePomodoroSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pomodoroStarted = time.Now()
 		m.pomodoroNow = m.pomodoroStarted
 		m.state = statePomodoroActive
+		db.LogEvent("pomodoro_started", fmt.Sprintf("tracker=%s duration=%.1fmin", m.pomodoroTrackerID, v))
 		return m, pomodoroTick()
 	}
 	if m.dateForm.State == huh.StateAborted {
@@ -748,6 +770,8 @@ func (m Model) updatePomodoroAbandonConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.dateForm.State == huh.StateCompleted {
 		if m.abandonConfirm != nil && *m.abandonConfirm {
+			elapsed := time.Since(m.pomodoroStarted).Minutes()
+			db.LogEvent("pomodoro_abandoned", fmt.Sprintf("tracker=%s elapsed=%.1fmin", m.pomodoroTrackerID, elapsed))
 			m.state = stateDashboard
 			if m.config != nil && m.config.App.Background.StarfieldEnabled {
 				return m, starfieldTick()
@@ -770,8 +794,11 @@ func (m Model) completePomodoro(date string, ended time.Time) error {
 		return nil
 	}
 	if err := db.AddDurationToEntry(m.config, date, m.pomodoroTrackerID, elapsed); err != nil {
+		db.LogEvent("pomodoro_failed", fmt.Sprintf("date=%s tracker=%s elapsed=%.1fmin err=%v", date, m.pomodoroTrackerID, elapsed, err))
 		return err
 	}
+	db.LogEvent("pomodoro_completed", fmt.Sprintf("date=%s tracker=%s elapsed=%.1fmin", date, m.pomodoroTrackerID, elapsed))
+	runBackupCmd(m.config)
 	entry, err := db.GetEntryForDate(date)
 	if err != nil {
 		return err
@@ -814,6 +841,8 @@ func (m *Model) updateDeleteConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.undoHad = true
 			if err := db.DeleteEntry(m.entryDate); err != nil {
 				fmt.Fprintf(os.Stderr, "gotrack: failed to delete entry: %v\n", err)
+			} else {
+				db.LogEvent("entry_deleted", fmt.Sprintf("date=%s", m.entryDate))
 			}
 			m.entries, _ = db.GetAllEntries()
 		}
@@ -1311,8 +1340,10 @@ func (m *Model) saveEntry() {
 	}
 	if err := db.UpsertEntry(entry); err != nil {
 		m.statusMsg = fmt.Sprintf("Save failed: %v", err)
+		db.LogEvent("entry_save_failed", fmt.Sprintf("date=%s err=%v", m.entryDate, err))
 		return
 	}
+	db.LogEvent("entry_saved", fmt.Sprintf("date=%s trackers=%d", m.entryDate, len(data)))
 	if err := integrations.ExportObsidianEntry(m.config, entry); err != nil {
 		m.statusMsg = fmt.Sprintf("Obsidian export failed: %v", err)
 	}
@@ -1329,8 +1360,63 @@ func runBackupCmd(cfg *models.Config) {
 		return
 	}
 	go func() {
-		_ = exec.Command("sh", "-c", cmd).Run()
+		err := exec.Command("sh", "-c", cmd).Run()
+		if err != nil {
+			db.LogEvent("backup_failed", err.Error())
+		} else {
+			db.LogEvent("backup_ok", cmd)
+		}
 	}()
+}
+
+// runBackupCmdSync runs cfg.App.BackupCmd synchronously, waiting up to 15s.
+// Used at quit time so the push completes before the process exits.
+func runBackupCmdSync(cfg *models.Config) {
+	if cfg == nil {
+		return
+	}
+	cmd := strings.TrimSpace(cfg.App.BackupCmd)
+	if cmd == "" {
+		return
+	}
+	c := exec.Command("sh", "-c", cmd)
+	done := make(chan error, 1)
+	go func() { done <- c.Run() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			db.LogEvent("backup_failed", err.Error())
+		} else {
+			db.LogEvent("backup_ok", cmd)
+		}
+	case <-time.After(15 * time.Second):
+		db.LogEvent("backup_timeout", cmd)
+		if c.Process != nil {
+			_ = c.Process.Kill()
+		}
+	}
+}
+
+type syncDoneMsg struct{ err error }
+
+// runSyncCmd runs cfg.App.SyncCmd and returns a tea.Cmd that sends syncDoneMsg when done.
+func runSyncCmd(cfg *models.Config) tea.Cmd {
+	if cfg == nil {
+		return nil
+	}
+	cmd := strings.TrimSpace(cfg.App.SyncCmd)
+	if cmd == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		err := exec.Command("sh", "-c", cmd).Run()
+		if err != nil {
+			db.LogEvent("sync_failed", err.Error())
+		} else {
+			db.LogEvent("sync_ok", cmd)
+		}
+		return syncDoneMsg{err: err}
+	}
 }
 
 func (m Model) View() string {

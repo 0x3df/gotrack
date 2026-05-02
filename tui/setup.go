@@ -325,8 +325,12 @@ func (w *setupWiz) buildForm() {
 				Value(&w.appSettings.StarfieldEnabled),
 			huh.NewInput().
 				Title("Backup command (optional)").
-				Description("Shell command run after every save. e.g. git -C ~/.gotrack add -A && git -C ~/.gotrack commit -m 'backup'").
+				Description("Shell command run after every save and on app close. e.g. git -C ~/.gotrack add -A && git -C ~/.gotrack commit -m 'backup' && git -C ~/.gotrack push").
 				Value(&w.appSettings.BackupCmd),
+			huh.NewInput().
+				Title("Sync command (optional)").
+				Description("Shell command run on app open. e.g. git -C ~/.gotrack pull").
+				Value(&w.appSettings.SyncCmd),
 		))
 	}
 }
