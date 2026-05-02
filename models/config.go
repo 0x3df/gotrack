@@ -108,6 +108,7 @@ type AppSettings struct {
 	Theme      ThemeName          `json:"theme,omitempty"`
 	Obsidian   ObsidianSettings   `json:"obsidian,omitempty"`
 	Background BackgroundSettings `json:"background,omitempty"`
+	BackupCmd  string             `json:"backup_cmd,omitempty"`
 }
 
 type ObsidianSettings struct {

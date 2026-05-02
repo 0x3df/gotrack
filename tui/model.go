@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -149,7 +150,7 @@ var keys = keyMap{
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Left, k.Right, k.Up, k.Down, k.HeroPrev, k.HeroNext, k.Add, k.Quick, k.Pomodoro, k.Settings, k.Help, k.Quit}
+	return []key.Binding{k.Help, k.Left, k.Right, k.Up, k.Down, k.HeroPrev, k.HeroNext, k.Add, k.Quick, k.Pomodoro, k.Settings, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
@@ -519,10 +520,30 @@ func trackerByID(cfg *models.Config, id string) (models.Tracker, bool) {
 	return models.Tracker{}, false
 }
 
-func trackerSelectOptions(trackers []models.Tracker) []huh.Option[string] {
+// trackerSelectOptions builds select options for the given trackers.
+// cfg is used to prepend "Category · " when tracker names are not unique.
+func trackerSelectOptions(cfg *models.Config, trackers []models.Tracker) []huh.Option[string] {
+	nameCount := map[string]int{}
+	for _, t := range trackers {
+		nameCount[t.Name]++
+	}
+	catOf := map[string]string{}
+	if cfg != nil {
+		for _, c := range cfg.Categories {
+			for _, t := range c.Trackers {
+				catOf[t.ID] = c.Name
+			}
+		}
+	}
 	opts := make([]huh.Option[string], 0, len(trackers))
 	for _, t := range trackers {
-		opts = append(opts, huh.NewOption(t.Name, t.ID))
+		label := t.Name
+		if nameCount[t.Name] > 1 {
+			if cat := catOf[t.ID]; cat != "" {
+				label = cat + " · " + t.Name
+			}
+		}
+		opts = append(opts, huh.NewOption(label, t.ID))
 	}
 	return opts
 }
@@ -539,7 +560,7 @@ func (m *Model) initQuickPick() {
 			Key("quickTrackerID").
 			Title("Quick entry").
 			Description("Pick one tracker to log for today.").
-			Options(trackerSelectOptions(trackers)...).
+			Options(trackerSelectOptions(m.config, trackers)...).
 			Value(&m.quickTrackerID),
 	))
 }
@@ -612,7 +633,11 @@ func (m Model) saveQuickEntry(date string) error {
 	if err != nil {
 		return err
 	}
-	return integrations.ExportObsidianEntry(m.config, entry)
+	if err := integrations.ExportObsidianEntry(m.config, entry); err != nil {
+		return err
+	}
+	runBackupCmd(m.config)
+	return nil
 }
 
 func (m *Model) initPomodoroSetup() {
@@ -628,7 +653,7 @@ func (m *Model) initPomodoroSetup() {
 			Key("pomodoroTrackerID").
 			Title("Pomodoro tracker").
 			Description("Pick the duration tracker that should receive this time.").
-			Options(trackerSelectOptions(trackers)...).
+			Options(trackerSelectOptions(m.config, trackers)...).
 			Value(&m.pomodoroTrackerID),
 		huh.NewInput().
 			Key("pomodoroMinutes").
@@ -1291,6 +1316,21 @@ func (m *Model) saveEntry() {
 	if err := integrations.ExportObsidianEntry(m.config, entry); err != nil {
 		m.statusMsg = fmt.Sprintf("Obsidian export failed: %v", err)
 	}
+	runBackupCmd(m.config)
+}
+
+// runBackupCmd runs cfg.App.BackupCmd in a background shell, fire-and-forget.
+func runBackupCmd(cfg *models.Config) {
+	if cfg == nil {
+		return
+	}
+	cmd := strings.TrimSpace(cfg.App.BackupCmd)
+	if cmd == "" {
+		return
+	}
+	go func() {
+		_ = exec.Command("sh", "-c", cmd).Run()
+	}()
 }
 
 func (m Model) View() string {

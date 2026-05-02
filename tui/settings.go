@@ -79,6 +79,7 @@ func newSettingsWiz(cfg *models.Config, entries []models.Entry) *settingsWiz {
 			ObsidianVault:    cfg.App.Obsidian.VaultPath,
 			ObsidianFolder:   cfg.App.Obsidian.DailyFolder,
 			StarfieldEnabled: cfg.App.Background.StarfieldEnabled,
+			BackupCmd:        cfg.App.BackupCmd,
 		},
 	}
 	w.buildForm()
@@ -400,6 +401,10 @@ func (w *settingsWiz) buildForm() {
 			huh.NewConfirm().
 				Title("Enable falling-stars background").
 				Value(&w.appSettings.StarfieldEnabled),
+			huh.NewInput().
+				Title("Backup command (optional)").
+				Description("Shell command run after every save. e.g. git -C ~/.gotrack add -A && git -C ~/.gotrack commit -m 'backup'").
+				Value(&w.appSettings.BackupCmd),
 			huh.NewSelect[string]().
 				Title("Action").
 				Options(
@@ -519,6 +524,7 @@ func (w *settingsWiz) advance() tea.Cmd {
 			w.workspace, _ = db.GetWorkspacePath()
 			w.pointerPath, _ = db.GetPointerFilePath()
 			w.notice = "App settings saved."
+			runBackupCmd(w.config)
 		}
 		w.phase = settingsPhaseMenu
 	}

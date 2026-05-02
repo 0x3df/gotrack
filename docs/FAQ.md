@@ -73,6 +73,82 @@ Your data lives in the workspace directory you chose during first launch (defaul
 **How do I backup or restore?**  
 Copy the workspace directory, or use `gotrack export --format json` and `gotrack import`. To restore from a folder, point GoTrack at that directory on next launch (or replace the workspace path in `~/.gotrack_workspace`).
 
+**How do I set up automatic backups?**  
+GoTrack can run a shell command after every save. Set it in Settings → App → "Backup command", or during first-launch setup. The command runs in the background and its output is discarded. See examples below.
+
+---
+
+### Backup recipes
+
+#### Git (local version history)
+
+Turn your workspace into a git repo and auto-commit every save:
+
+```bash
+# One-time setup — run in your terminal
+cd ~/.gotrack          # or wherever your workspace is
+git init
+git add -A
+git commit -m "initial"
+```
+
+Backup command to set in GoTrack:
+
+```
+git -C ~/.gotrack add -A && git -C ~/.gotrack commit -m "backup $(date +%Y-%m-%d)"
+```
+
+Every entry save creates a new commit. Run `git log` in `~/.gotrack` to see the history.
+
+#### Git + remote (GitHub/Gitea for off-site backup)
+
+After the git setup above, add a remote:
+
+```bash
+cd ~/.gotrack
+git remote add origin git@github.com:yourname/gotrack-data.git
+```
+
+Backup command:
+
+```
+git -C ~/.gotrack add -A && git -C ~/.gotrack commit -m "backup $(date +%Y-%m-%d)" ; git -C ~/.gotrack push
+```
+
+> **Privacy note:** this will push your raw tracking data to the remote. Use a private repo.
+
+#### rclone (cloud: S3, Dropbox, Google Drive, etc.)
+
+```bash
+# One-time: configure a remote named "mycloud"
+rclone config
+```
+
+Backup command:
+
+```
+rclone sync ~/.gotrack mycloud:gotrack-backup
+```
+
+#### Syncthing (peer-to-peer sync, no cloud required)
+
+Add `~/.gotrack` as a shared folder in the [Syncthing GUI](https://syncthing.net/). No backup command needed — Syncthing watches the directory and syncs on change automatically.
+
+#### Restic (encrypted snapshots)
+
+```bash
+# One-time: initialise a repo (local or remote)
+restic -r /path/to/restic-repo init
+```
+
+Backup command:
+
+```
+restic -r /path/to/restic-repo backup ~/.gotrack
+```
+
+---
+
 **Does reinstalling wipe my data?**  
 No. The binary and data are separate. Replacing `gotrack` won't affect your workspace database.
 

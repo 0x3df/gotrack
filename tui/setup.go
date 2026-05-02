@@ -323,6 +323,10 @@ func (w *setupWiz) buildForm() {
 			huh.NewConfirm().
 				Title("Enable falling-stars background").
 				Value(&w.appSettings.StarfieldEnabled),
+			huh.NewInput().
+				Title("Backup command (optional)").
+				Description("Shell command run after every save. e.g. git -C ~/.gotrack add -A && git -C ~/.gotrack commit -m 'backup'").
+				Value(&w.appSettings.BackupCmd),
 		))
 	}
 }
